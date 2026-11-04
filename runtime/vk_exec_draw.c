@@ -2270,6 +2270,42 @@ typedef struct {
 // 782b2585777d2b4e, 392e2956038a9e64 and 7d85669ac430f01a read Location 9, feed every attribute per instance and carry
 // the same integer code (four reads of c9 at a computed index), and skipping every such quad left out ten vertex stages
 // that drew in all 17 logged runs. So it is matched by the name of its NVN 2 stage.
+// LOCAL DIAGNOSTIC, not for a PR. DKB_PAIR_LOG=1 logs each new (vs, fs, gs) stage set at its first draw, to name the
+// draw behind a lost device. DKB_SKIP_STAGE=<hex>[,<hex>] skips the draws that use one of those NVN 2 stages.
+// ponytail: a fixed table and list, enough for one session's stage sets; it stops logging when full.
+static int stage_diag_skip(const VkExec *ex, const GfxShader *vs) {
+    static int on = -1, nskip;
+    static uint64_t skip[16], seen[1 << 16];
+    if (on < 0) {
+        const char *e = getenv("DKB_SKIP_STAGE"), *l = getenv("DKB_PAIR_LOG");
+        for (char *end; e && *e && nskip < 16; e = *end ? end + 1 : end) skip[nskip++] = strtoull(e, &end, 16);
+        on = (l && *l == '1') ? 2 : nskip > 0;
+    }
+    if (!on) return 0;
+    static const int st[3] = {NVN_STAGE_VS, NVN_STAGE_FS, NVN_STAGE_GS};
+    uint64_t o[3] = {0}, h = 1469598103934665603ull;
+    for (int i = 0; i < 3; i++) {
+        const uint8_t *ctl, *code = NULL;
+        uint32_t len;
+        if (find_stage(ex->prog, st[i], &ctl, &code, &len)) o[i] = nvn2_origin(code);
+        h = (h ^ o[i]) * 1099511628211ull;
+        for (int k = 0; k < nskip; k++) if (o[i] && o[i] == skip[k]) return 1;
+    }
+    if (on == 2) {
+        if (!h) h = 1;
+        for (uint32_t i = (uint32_t)h & 0xffff, n = 0; n < 1 << 12; i = (i + 1) & 0xffff, n++) {
+            if (seen[i] == h) break;
+            if (!seen[i]) {
+                seen[i] = h;
+                GfxShaderIo io[32];
+                rt_log("stage set: vs %016llx fs %016llx gs %016llx inputs %08llx", (unsigned long long)o[0], (unsigned long long)o[1], (unsigned long long)o[2], vs ? (unsigned long long)gfx_shader_inputs(vs, io) : 0ull);
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
 static int light_quad_fault_skip(const VkExec *ex, const GfxShader *vs, const GfxShader *fs) {
     static int on = -1;
     if (on < 0) on = !rt_game_version && cfg_bool("TOTK_FIX_VS_FAULT") && vk_ctx()->props.vendorID == 0x10de;   // 0: Bananza
@@ -2502,6 +2538,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         native_gs_vs = vs, native_gs_fs = fs;
         if (gs_wait) gs = shader_for(ex, NVN_STAGE_GS, &has_gs, NULL, 1);
     }
+    if (stage_diag_skip(ex, vs)) return 0;
     if (light_quad_fault_skip(ex, vs, fs)) return 0;
     if (!vs || (has_fs && !fs) || (want_gs && (!has_gs || !gs))) return 0;
     if (!geometry_feedback_safe(ex, vs, gs)) return 0;
