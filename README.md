@@ -1,5 +1,131 @@
 # DKB Recomp
 
+> [!WARNING]
+> **Este é um fork pessoal para testes**, baseado em [Lucas-blip-png/dkb-pc-recomp](https://github.com/Lucas-blip-png/dkb-pc-recomp) `6386b42`. A branch `local-prs` junta os PRs #67, #68 e #72, que o projeto ainda não aceitou, e um diagnóstico local. Problemas desta branch não devem ser relatados ao projeto original como se fossem dele.
+
+## Como compilar o Donkey Kong Bananza (branch `local-prs`)
+
+O resultado é um `dkb.exe` nativo para Windows, sem emulador, gerado no seu PC a partir da sua cópia do jogo. **Ainda é experimental:** pode travar, e alguns efeitos ficam faltando.
+
+Este repositório não tem jogo, keys nem executável, e este guia não explica como obter o jogo. Tudo o que o build gera sai do jogo: **não compartilhe** o `dkb.exe`, `generated\`, `build\`, o cache de shaders, os saves nem o dump.
+
+Usa um assistente de IA? Peça para ele seguir [`amigos/AGENTS.md`](amigos/AGENTS.md).
+
+### 1. Confira se você tem o necessário
+
+- Windows 10 ou 11 em um PC x64, com CPU com AVX2.
+- Placa de vídeo com Vulkan 1.3 e driver atualizado.
+- 16 GB de RAM ou mais (o jogo usa cerca de 13 GB).
+- Cerca de 60 GB livres.
+- Seu dump da **versão base 1.0.0**, nesta estrutura. A atualização 458752 e o DLC não têm suporte.
+
+```
+<dump>\base\exefs\main, sdk, rtld, main.npdm
+<dump>\base\romfs\...
+```
+
+### 2. Instale as ferramentas
+
+Você também precisa de [Git](https://git-scm.com) e [Python 3.12](https://www.python.org/downloads/). No PowerShell, instale o resto (o Windows pode pedir permissão de administrador):
+
+```powershell
+winget install --id MSYS2.MSYS2 -e
+winget install --id Microsoft.VisualStudio.BuildTools -e --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+winget install --id Microsoft.DotNet.SDK.10 -e
+```
+
+Abra um PowerShell **novo** e instale o compilador e as bibliotecas. O primeiro comando pode fechar o próprio MSYS2 no meio da atualização; é normal, e por isso ele roda duas vezes:
+
+```powershell
+$env:MSYSTEM = "UCRT64"; $env:CHERE_INVOKING = "1"
+C:\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm"
+C:\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm"
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip"
+```
+
+### 3. Baixe o código
+
+```powershell
+git clone -b local-prs https://github.com/sostenesfreitas/dkb-pc-recomp
+cd dkb-pc-recomp
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r tools\requirements.txt
+```
+
+O `-b local-prs` é necessário: a branch padrão não tem estas correções.
+
+### 4. Compile
+
+Rode tudo na mesma janela, de dentro de `dkb-pc-recomp`. Na primeira linha, troque o caminho pela pasta do seu dump. Num Ryzen 9 9950X3D, o processo todo levou cerca de 15 minutos.
+
+```powershell
+$dump = "C:\caminho\do\seu\dump"
+$env:PATH = "C:\msys64\ucrt64\bin;C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
+$env:PYTHONUTF8 = "1"
+
+# Confere se o dump é a versão 1.0.0: deve mostrar True
+(Get-Content tools\data\expected-dkb100.json | ConvertFrom-Json).exefs_sha256.main -eq (Get-FileHash "$dump\base\exefs\main").Hash
+
+# O tradutor de shaders
+.venv\Scripts\python tools\build_xlate.py
+
+# O código do jogo vira C
+.venv\Scripts\python recomp\gen.py --exefs "$dump\base\exefs" --out generated\dkb100 --modules main,sdk --patches recomp\patches-dkb100.txt
+
+# Os arquivos do jogo, cerca de 9 GB
+.venv\Scripts\python tools\dkb_pack_romfs.py --dir "$dump\base\romfs" --out build\extracted\dkb100\romfs
+
+# O executável
+.venv\Scripts\python tools\build_game.py --version dkb100 --expected tools\data\expected-dkb100.json --exefs "$dump\base\exefs" --romfs build\extracted\dkb100\romfs
+
+# A verificação: deve terminar com "selftest: passed (0 failures)"
+build\dkb100\dkb.exe --selftest
+```
+
+Se pouca memória travar o PC, adicione `--jobs 6` ao comando do `build_game.py`.
+
+### 5. Jogue
+
+Só na primeira vez, copie as configurações. Sem elas, o terreno destrutível fica preto:
+
+```powershell
+Copy-Item amigos\totk.ini build\dkb100\totk.ini
+```
+
+Para abrir o jogo, da pasta `dkb-pc-recomp`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File amigos\jogar-dk.ps1
+```
+
+Conecte um controle antes de abrir. **F11** alterna a tela cheia e **F10** mostra o fps. Se o PC tiver mais de uma placa, defina parte do nome da certa antes de abrir, por exemplo `$env:TOTK_GPU_NAME = "5090"`.
+
+### O que esperar
+
+Testado só em uma RTX 5090 com driver 617.14, a partir de um save no começo do jogo.
+
+| O que acontece | Motivo |
+|---|---|
+| Engasgos ao ver uma área pela primeira vez | Shaders e pipelines sendo preparados; ficam salvos para as próximas vezes |
+| Falta algum efeito ou luz | O projeto e o `amigos\jogar-dk.ps1` pulam shaders que derrubam a GPU na NVIDIA |
+| Jogo fecha com `device lost` no log | Problema conhecido na NVIDIA, ainda sem causa definida; pode aparecer em áreas novas |
+| Imagem interna em 1620p, mesmo em 4K | O jogo ainda desenha na resolução dele e o FSR amplia |
+| Limite de 60 fps | Acima disso não há suporte para este jogo |
+
+Em placas AMD ou Intel, a lista de shaders pulados não foi testada. Comece abrindo o jogo direto, por `build\dkb100\dkb.exe`, depois de definir `$env:TOTK_GPU_NAME`.
+
+Se o jogo fechar, copie `build\dkb100\logs\totk.log` antes de abrir de novo, porque a próxima execução renomeia esse arquivo. Como investigar: [`amigos/AGENTS.md`](amigos/AGENTS.md).
+
+### Atualizar
+
+```powershell
+git pull
+```
+
+Depois repita, na mesma janela da etapa 4 (com `$dump`, `PATH` e `PYTHONUTF8` definidos), o `build_xlate.py`, o `gen.py` e o `build_game.py`.
+
+---
+
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 [![Content guard](https://github.com/Lucas-blip-png/dkb-pc-recomp/actions/workflows/content-guard.yml/badge.svg?branch=bananza)](https://github.com/Lucas-blip-png/dkb-pc-recomp/actions/workflows/content-guard.yml)
 [![Stars](https://img.shields.io/github/stars/Lucas-blip-png/dkb-pc-recomp?style=flat)](https://github.com/Lucas-blip-png/dkb-pc-recomp/stargazers)

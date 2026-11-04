@@ -32,12 +32,12 @@ py -3.12 -m venv .venv
 ```
 
 ## 4. Compilar
-Use `C:\msys64\ucrt64\bin` e `C:\Program Files (x86)\Microsoft Visual Studio\Installer` no início do PATH e `PYTHONUTF8=1`. Rode os comandos da seção "Passos" do `amigos/LEIA-ME.md`, nesta ordem. A etapa do código gerado e a do `build_game.py` são as mais pesadas; rode-as em segundo plano.
+Use `C:\msys64\ucrt64\bin` e `C:\Program Files (x86)\Microsoft Visual Studio\Installer` no início do PATH e `PYTHONUTF8=1`. Rode os comandos da etapa 4 do `README.md`, nesta ordem. A etapa do código gerado e a do `build_game.py` são as mais pesadas; rode-as em segundo plano.
 
 Para verificar: `build\dkb100\dkb.exe --selftest` deve terminar com `selftest: passed (0 failures)`.
 
 ## 5. Rodar
-Copie `amigos\totk.ini` para `build\dkb100` e use `amigos\jogar-dk.ps1`, como no `amigos/LEIA-ME.md`. Sem o `totk.ini`, o terreno destrutível fica preto.
+Copie `amigos\totk.ini` para `build\dkb100` e use `amigos\jogar-dk.ps1`, como na etapa 5 do `README.md`. Sem o `totk.ini`, o terreno destrutível fica preto.
 - Ajuste `TOTK_GPU_NAME` para parte do nome da placa, se o PC tiver mais de uma.
 - Rode de dentro do repositório: o jogo acha o tradutor procurando `build\xlate` nas pastas acima dele.
 - Os engasgos da primeira passada por uma área são normais: vêm de shaders e pipelines sendo preparados.
