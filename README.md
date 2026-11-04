@@ -11,6 +11,20 @@ Este repositório não tem jogo, keys nem executável, e este guia não explica 
 
 Usa um assistente de IA? Peça para ele seguir [`amigos/AGENTS.md`](amigos/AGENTS.md).
 
+### Jeito fácil: um comando só
+
+Abra o PowerShell, cole o comando abaixo e, quando pedir, escolha a pasta do seu dump (a que contém a pasta `base`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/sostenesfreitas/dkb-pc-recomp/local-prs/amigos/instalar-dk.ps1 | iex"
+```
+
+Ele confere o PC e o dump, instala o que faltar, compila tudo em `%USERPROFILE%\dkb-pc-recomp`, roda o autoteste e cria o atalho **Donkey Kong Bananza** na Área de Trabalho. O Windows pode pedir permissão de administrador para instalar as ferramentas. Se algo falhar ou você quiser atualizar, rode o mesmo comando de novo. Antes de colar, você pode ler o script em [`amigos/instalar-dk.ps1`](amigos/instalar-dk.ps1).
+
+Você ainda precisa do próprio dump da versão 1.0.0 e de 16 GB de RAM e 60 GB livres. O instalador só foi testado em um PC que já tinha as ferramentas; em um PC limpo, se ele parar, mande o registro `%TEMP%\dkb-instalar.log`.
+
+As etapas abaixo são o mesmo processo, passo a passo, para quem prefere fazer à mão.
+
 ### 1. Confira se você tem o necessário
 
 - Windows 10 ou 11 em um PC x64, com CPU com AVX2.
@@ -70,7 +84,7 @@ $env:PYTHONUTF8 = "1"
 .venv\Scripts\python tools\build_xlate.py
 
 # O código do jogo vira C
-.venv\Scripts\python recomp\gen.py --exefs "$dump\base\exefs" --out generated\dkb100 --modules main,sdk --patches recomp\patches-dkb100.txt
+.venv\Scripts\python recomp\gen.py --exefs "$dump\base\exefs" --out generated\dkb100 --modules 'main,sdk' --patches recomp\patches-dkb100.txt
 
 # Os arquivos do jogo, cerca de 9 GB
 .venv\Scripts\python tools\dkb_pack_romfs.py --dir "$dump\base\romfs" --out build\extracted\dkb100\romfs
