@@ -13,7 +13,7 @@ Usa um assistente de IA? Peça para ele seguir [`amigos/AGENTS.md`](amigos/AGENT
 
 ### Jeito fácil: um comando só
 
-Abra o PowerShell, cole o comando abaixo e, quando pedir, escolha a pasta do seu dump (a que contém a pasta `base`):
+Abra o PowerShell, cole o comando abaixo e, quando pedir, escolha a pasta do seu dump:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/sostenesfreitas/dkb-pc-recomp/local-prs/amigos/instalar-dk.ps1 | iex"

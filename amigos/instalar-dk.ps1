@@ -48,14 +48,16 @@ Write-Host "RAM $ram GB, $livre GB livres em ${unidade}:"
 $dump = $env:DK_DUMP
 if (-not $dump) {
     $d = New-Object System.Windows.Forms.FolderBrowserDialog
-    $d.Description = 'Escolha a pasta do seu dump: a que contem a pasta "base"'
+    $d.Description = 'Escolha a pasta do seu dump'
     if ($d.ShowDialog() -ne 'OK') { Parar 'nenhuma pasta escolhida.' }
     $dump = $d.SelectedPath
 }
+# Accepts the dump folder, its base folder, or a dump with exefs and romfs directly inside
+$base = if (Test-Path (Join-Path $dump 'base\exefs\main')) { Join-Path $dump 'base' } else { $dump }
 foreach ($f in 'main', 'sdk', 'rtld', 'main.npdm') {
-    if (-not (Test-Path (Join-Path $dump "base\exefs\$f"))) { Parar "nao achei base\exefs\$f em $dump." }
+    if (-not (Test-Path (Join-Path $base "exefs\$f"))) { Parar "nao achei exefs\$f em $base. Escolha a pasta do jogo, a que contem base ou exefs e romfs." }
 }
-if (-not (Test-Path (Join-Path $dump 'base\romfs'))) { Parar "nao achei base\romfs em $dump." }
+if (-not (Test-Path (Join-Path $base 'romfs'))) { Parar "nao achei a pasta romfs em $base." }
 
 Titulo '2/7 Ferramentas'
 AtualizarPath
@@ -112,18 +114,18 @@ Rodar .venv\Scripts\python.exe -m pip install -q --disable-pip-version-check -r 
 $python = (Resolve-Path '.venv\Scripts\python.exe').Path
 
 $esperado = (Get-Content 'tools\data\expected-dkb100.json' -Raw | ConvertFrom-Json).exefs_sha256.main
-if ($esperado -ne (Get-FileHash (Join-Path $dump 'base\exefs\main')).Hash) { Parar 'este dump nao e a versao base 1.0.0. A atualizacao 458752 e o DLC nao tem suporte.' }
+if ($esperado -ne (Get-FileHash (Join-Path $base 'exefs\main')).Hash) { Parar 'este dump nao e a versao base 1.0.0. A atualizacao 458752 e o DLC nao tem suporte.' }
 Write-Host 'Dump confere: versao 1.0.0.'
 
 Titulo '5/7 Tradutor de shaders e codigo do jogo'
 Rodar $python tools\build_xlate.py
-Rodar $python recomp\gen.py --exefs (Join-Path $dump 'base\exefs') --out generated\dkb100 --modules 'main,sdk' --patches recomp\patches-dkb100.txt
+Rodar $python recomp\gen.py --exefs (Join-Path $base 'exefs') --out generated\dkb100 --modules 'main,sdk' --patches recomp\patches-dkb100.txt
 
 Titulo '6/7 Arquivos do jogo e executavel (pode levar uns 15 minutos)'
 if (-not (Test-Path 'build\extracted\dkb100\romfs\romfs.bin')) {
-    Rodar $python tools\dkb_pack_romfs.py --dir (Join-Path $dump 'base\romfs') --out build\extracted\dkb100\romfs
+    Rodar $python tools\dkb_pack_romfs.py --dir (Join-Path $base 'romfs') --out build\extracted\dkb100\romfs
 }
-Rodar $python tools\build_game.py --version dkb100 --expected tools\data\expected-dkb100.json --exefs (Join-Path $dump 'base\exefs') --romfs build\extracted\dkb100\romfs
+Rodar $python tools\build_game.py --version dkb100 --expected tools\data\expected-dkb100.json --exefs (Join-Path $base 'exefs') --romfs build\extracted\dkb100\romfs
 
 Titulo '7/7 Verificando'
 Rodar build\dkb100\dkb.exe --selftest
