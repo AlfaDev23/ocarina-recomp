@@ -65,13 +65,28 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Instalar 'Git.Git' }
 if ($LASTEXITCODE -ne 0) { Instalar 'Python.Python.3.12' }
 if (-not (Test-Path 'C:\msys64\usr\bin\bash.exe')) { Instalar 'MSYS2.MSYS2' }
 $vs = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer'
-$temVc = (Test-Path "$vs\vswhere.exe") -and (& "$vs\vswhere.exe" -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-if (-not $temVc) { Instalar 'Microsoft.VisualStudio.BuildTools' '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended' }
+# The shader translator links with MSVC: what it needs is the C++ tools and the Windows SDK, not just any Visual Studio
+function TemCpp() {
+    $vc = (Test-Path "$vs\vswhere.exe") -and (& "$vs\vswhere.exe" -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+    $sdk = Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\*\um\x64\kernel32.lib"
+    return ($vc -and $sdk)
+}
+if (-not (TemCpp)) {
+    $existente = if (Test-Path "$vs\vswhere.exe") { & "$vs\vswhere.exe" -latest -prerelease -products '*' -property installationPath }
+    if ($existente) {
+        # winget says "already installed" and adds nothing to an install without C++, so ask the Visual Studio Installer
+        Write-Host "Adicionando as ferramentas de C++ ao Visual Studio em $existente (o Windows pode pedir permissao; leva alguns minutos)..."
+        $a = "modify --installPath `"$existente`" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --quiet --norestart --force"
+        Start-Process "$vs\setup.exe" -ArgumentList $a -Verb RunAs -Wait
+    } else {
+        Instalar 'Microsoft.VisualStudio.BuildTools' '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+    }
+    if (-not (TemCpp)) { Parar 'faltam as ferramentas de C++ do Visual Studio. Abra o Visual Studio Installer, clique em Modificar, marque "Desenvolvimento para desktop com C++" e rode este comando de novo.' }
+}
 $sdks = (Get-Command dotnet -ErrorAction SilentlyContinue) -and (& dotnet --list-sdks | Select-String '^10\.')
 if (-not $sdks) { Instalar 'Microsoft.DotNet.SDK.10' }
 foreach ($c in 'git', 'py', 'dotnet') { if (-not (Get-Command $c -ErrorAction SilentlyContinue)) { Parar "$c nao foi instalado. Feche esta janela e rode de novo." } }
 if (-not (Test-Path 'C:\msys64\usr\bin\bash.exe')) { Parar 'o MSYS2 nao foi instalado.' }
-if (-not (Test-Path "$vs\vswhere.exe")) { Parar 'o Visual Studio Build Tools nao foi instalado.' }
 
 Titulo '3/7 Compilador (MSYS2)'
 $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
