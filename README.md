@@ -2,7 +2,7 @@
 
 [Read in English](README.en.md)
 
-**The Legend of Zelda: Ocarina of Time (Switch 2) rodando nativo no Windows, sem emulador.**
+**Ocarina of Time (Switch 2) rodando nativo no Windows, sem emulador.**
 
 O código do jogo é traduzido para C e compilado como um programa do Windows. Os gráficos do Switch 2 são convertidos para Vulkan. Tudo isso acontece **no seu PC, a partir do seu próprio arquivo do jogo**.
 
