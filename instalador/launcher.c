@@ -8,7 +8,7 @@ int WINAPI WinMain(HINSTANCE self, HINSTANCE prev, LPSTR line, int show) {
     HRSRC res = FindResourceW(self, MAKEINTRESOURCEW(101), MAKEINTRESOURCEW(10));   // 10: RT_RCDATA
     HGLOBAL data = res ? LoadResource(self, res) : NULL;
     if (!data) return 2;
-    wchar_t dir[MAX_PATH], path[MAX_PATH], cmd[MAX_PATH + 128];
+    wchar_t dir[MAX_PATH], path[MAX_PATH], cmd[2 * MAX_PATH + 128];
     wchar_t self_path[MAX_PATH];   // the installer finds the ZIP's other folders beside this program
     DWORD n = GetModuleFileNameW(NULL, self_path, MAX_PATH);
     while (n && self_path[n - 1] != L'\\') n--;
@@ -24,7 +24,9 @@ int WINAPI WinMain(HINSTANCE self, HINSTANCE prev, LPSTR line, int show) {
     WriteFile(f, LockResource(data), size, &wrote, NULL);
     CloseHandle(f);
     if (wrote != size) { DeleteFileW(path); return 5; }
-    wsprintfW(cmd, L"powershell.exe -NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%s\"", path);
+    wchar_t sys[MAX_PATH];   // by full path: a PATH that is too long or broken must not hide it
+    GetSystemDirectoryW(sys, MAX_PATH);
+    wsprintfW(cmd, L"\"%s\WindowsPowerShell\v1.0\powershell.exe\" -NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%s\"", sys, path);
     STARTUPINFOW si = {.cb = sizeof si};
     PROCESS_INFORMATION pi;
     if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
