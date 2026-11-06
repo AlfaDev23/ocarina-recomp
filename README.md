@@ -25,9 +25,18 @@ Experimental. Só foi testado em **um PC** (Ryzen 9 9950X3D, RTX 5090), na regi�
 
 ## Como compilar
 
-Não há nada pronto para baixar: o jogo é compilado no seu PC, a partir da sua cópia. Depois de instalar as ferramentas (passo 1 do [guia](docs/compilar-manual.md)), dá para seguir de dois jeitos.
+O jogo não vem pronto: ele é compilado no seu PC, a partir da sua cópia. Escolha um destes três jeitos.
 
-**Com os scripts, que você pode ler antes de rodar:**
+**1. Com o instalador, o mais fácil:**
+
+1. Baixe o **[Instalar-Ocarina.exe](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest/download/Instalar-Ocarina.exe)** e dê dois cliques.
+2. O executável não tem assinatura digital, então o Windows pode avisar. Clique em **Mais informações** e depois em **Executar assim mesmo**.
+3. Na janela, escolha o `.nup` do seu jogo (ou uma pasta com `exefs` e `romfs`) e clique em **Instalar**.
+4. Se o Windows pedir permissão para instalar as ferramentas, clique em **Sim**.
+
+Prefere conferir antes? O executável só abre o [script do instalador](instalador/Instalar-Ocarina.ps1), e o [código dele](instalador/launcher.c) tem poucas linhas. A release traz o SHA-256 do arquivo. Antivírus às vezes reclamam de programas sem assinatura.
+
+**2. Com os scripts, que você pode ler antes de rodar** (instale antes as ferramentas do passo 1 do [guia](docs/compilar-manual.md)):
 
 ```powershell
 git clone https://github.com/sostenesfreitas/ocarina-recomp C:\OcarinaRecomp
@@ -43,16 +52,19 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\caminho\seu-jo
 
 `-ExecutionPolicy Bypass` vale só para esse comando e não muda a configuração do Windows.
 
-**Totalmente à mão:** siga o **[passo a passo para compilar](docs/compilar-manual.md)**.
+**3. Totalmente à mão:** siga o **[passo a passo para compilar](docs/compilar-manual.md)**.
 
 ### O que isto faz no seu PC
 
-- Não pede administrador. Instalar as ferramentas do passo 1 pode pedir, e isso é você quem roda.
+- Os scripts não pedem administrador. Instalar as ferramentas pode pedir: o instalador faz isso por você, e nos outros jeitos é você quem roda.
 - Escreve só dentro da pasta do projeto, e nunca altera o seu arquivo do jogo.
 - Baixa os pacotes Python (`tools\requirements.txt`) e .NET do tradutor de shaders e, se o executável do jogo estiver comprimido, o [zbic](https://github.com/kinnay/zbic).
 - Para desinstalar, apague a pasta do projeto. As ferramentas do passo 1 saem pelo painel de aplicativos do Windows.
 
-Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualizar, veja o fim do guia.
+Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualizar, rode de novo o instalador ou veja o fim do guia.
+
+> [!NOTE]
+> Na primeira vez que abrir o jogo, **a vegetação pode levar alguns minutos para aparecer**, enquanto os shaders compilam em segundo plano. Melhora nas próximas vezes.
 
 ### Do que você precisa
 
@@ -90,7 +102,7 @@ Leia o **[guia de contribuição](CONTRIBUTING.md)**. Testar em outras placas de
 
 ## Créditos
 
-Projeto mantido por **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Dizem que ele deixou um recado escondido dentro do jogo. 🍜
+Projeto mantido por **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Dizem que ele deixou um recado escondido no instalador e outro dentro do jogo. 🍜
 
 Este projeto existe graças ao trabalho de muita gente:
 

@@ -25,9 +25,18 @@ Experimental. It has only been tested on **one PC** (Ryzen 9 9950X3D, RTX 5090),
 
 ## How to build
 
-There is nothing ready to download: the game is built on your PC from your copy. After installing the tools (step 1 of the [guide](docs/build-by-hand.md)), there are two ways to go.
+The game does not come ready-made: it is built on your PC from your copy. Choose one of these three ways.
 
-**With the scripts, which you can read before running:**
+**1. With the installer, the easiest:**
+
+1. Download **[Instalar-Ocarina.exe](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest/download/Instalar-Ocarina.exe)** and double-click it.
+2. The executable has no digital signature, so Windows may warn you. Click **More info** and then **Run anyway**.
+3. In the window, choose your game's `.nup` (or a folder with `exefs` and `romfs`) and click **Install**.
+4. If Windows asks for permission to install the tools, click **Yes**.
+
+Want to check first? The executable only opens the [installer script](instalador/Instalar-Ocarina.ps1), and [its code](instalador/launcher.c) is a few lines long. The release lists the file's SHA-256. Antivirus programs sometimes complain about unsigned programs.
+
+**2. With the scripts, which you can read before running** (first install the tools from step 1 of the [guide](docs/build-by-hand.md)):
 
 ```powershell
 git clone https://github.com/sostenesfreitas/ocarina-recomp C:\OcarinaRecomp
@@ -43,16 +52,19 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\path\your-game
 
 `-ExecutionPolicy Bypass` applies only to that command and does not change your Windows settings.
 
-**Fully by hand:** follow the **[step-by-step build guide](docs/build-by-hand.md)**.
+**3. Fully by hand:** follow the **[step-by-step build guide](docs/build-by-hand.md)**.
 
 ### What this does on your PC
 
-- It does not ask for administrator. Installing the tools in step 1 may, and you run that yourself.
+- The scripts do not ask for administrator. Installing the tools may: the installer does that for you, and in the other ways you run it yourself.
 - It writes only inside the project folder, and never changes your game file.
 - It downloads the Python packages (`tools\requirements.txt`), the shader translator's .NET packages and, if the game's executable is compressed, [zbic](https://github.com/kinnay/zbic).
 - To uninstall, delete the project folder. The tools from step 1 are removed through Windows' apps panel.
 
-It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To update, see the end of the guide.
+It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To update, run the installer again or see the end of the guide.
+
+> [!NOTE]
+> The first time you open the game, **plants can take a few minutes to appear** while shaders compile in the background. It gets better after that.
 
 ### What you need
 
@@ -90,7 +102,7 @@ Read the **[contributing guide](CONTRIBUTING.en.md)**. Testing on other graphics
 
 ## Credits
 
-Maintained by **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Word is he left a hidden message inside the game. 🍜
+Maintained by **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Word is he left a hidden message in the installer and another one inside the game. 🍜
 
 This project exists thanks to the work of many people:
 
