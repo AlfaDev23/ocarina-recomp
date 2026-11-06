@@ -70,7 +70,7 @@ It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To upda
 
 - 64-bit Windows 10 or 11, with an AVX2-capable processor.
 - A graphics card with Vulkan 1.3 and mesh shaders, with an up-to-date driver. We recommend NVIDIA.
-- 16 GB of RAM or more.
+- We recommend 16 GB of RAM or more. We never tested with less: the build or the game may fail.
 - 60 GB free, plus about 15 GB on C: if the tools are not installed yet.
 - Internet access during installation.
 - **Your copy of the game at version 1.1.1.** Other versions do not work.

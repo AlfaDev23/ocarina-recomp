@@ -70,7 +70,7 @@ Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualiz
 
 - Windows 10 ou 11 de 64 bits, com processador compatível com AVX2.
 - Placa de vídeo com Vulkan 1.3 e mesh shaders, com o driver atualizado. Recomendamos NVIDIA.
-- 16 GB de RAM ou mais.
+- Recomendamos 16 GB de RAM ou mais. Com menos, nunca testamos: a compilação ou o jogo podem falhar.
 - 60 GB livres, mais uns 15 GB no disco C: se as ferramentas ainda não estiverem instaladas.
 - Internet durante a instalação.
 - **Sua cópia do jogo na versão 1.1.1.** Outras versões não funcionam.

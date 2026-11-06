@@ -28,7 +28,8 @@ Write-Host ''
 
 Item ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64') (L 'Windows de 64 bits' '64-bit Windows') ''
 $ram = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-Item ($ram -ge 15) ((L 'Memória RAM: {0} GB (precisa de 16)' 'RAM: {0} GB (16 required)') -f $ram) ''
+if ($ram -ge 15) { Item $true ((L 'Memória RAM: {0} GB' 'RAM: {0} GB') -f $ram) '' }
+else { Aviso ((L 'Memória RAM: {0} GB. Com menos de 16 GB, nunca testamos: a compilação ou o jogo podem falhar.' 'RAM: {0} GB. We never tested with less than 16 GB: the build or the game may fail.') -f $ram) }
 
 $unidade = $raiz.Substring(0, 1)
 $livre = [Math]::Floor((Get-PSDrive $unidade).Free / 1GB)

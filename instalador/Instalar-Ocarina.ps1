@@ -451,7 +451,7 @@ $script:jogo = $null; $script:jogoNup = $false; $script:nupOpcoes = @('--overlay
 $script:pasta = if ($env:OCARINA_PASTA) { $env:OCARINA_PASTA } else { PastaPadrao }
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { $script:avisos += (L 'Este instalador só funciona em Windows de 64 bits.' 'This installer only works on 64-bit Windows.'); $script:bloqueio = $true }
 $ram = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-if ($ram -lt 15) { $script:avisos += (L "Precisa de 16 GB de RAM; este PC tem $ram GB." "16 GB of RAM is required; this PC has $ram GB."); $script:bloqueio = $true }
+if ($ram -lt 15) { $script:avisos += (L "Este PC tem $ram GB de RAM. Com menos de 16 GB, nunca testamos: a compilação ou o jogo podem falhar." "This PC has $ram GB of RAM. We never tested with less than 16 GB: the build or the game may fail.") }
 $gpus = (Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -join ', '
 if ($gpus -notmatch 'NVIDIA') { $script:avisos += (L "Só testamos em placa NVIDIA. Sua placa ($gpus) pode não funcionar." "We only tested on NVIDIA cards. Your card ($gpus) may not work.") }
 Validar
