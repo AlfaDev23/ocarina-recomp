@@ -23,7 +23,9 @@ $raiz = $PSScriptRoot
 Set-Location -LiteralPath $raiz
 $py = '.venv\Scripts\python.exe'
 $ZBIC = '11b08f2712264bbed731545085cbd9702096ceb7'
-$env:PATH = "C:\msys64\ucrt64\bin;C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH"
+# each folder once: cmd.exe, which some build steps use, stops finding programs when PATH is around 8 KB long
+$vistos = @{}
+$env:PATH = (("C:\msys64\ucrt64\bin;C:\Program Files (x86)\Microsoft Visual Studio\Installer;$env:PATH" -split ';') | Where-Object { $_ -and -not $vistos.ContainsKey($_.ToLower()) -and ($vistos[$_.ToLower()] = $true) }) -join ';'
 $env:PYTHONUTF8 = '1'
 
 # Runs one program, or only shows it with -Simular. A failure stops the build.

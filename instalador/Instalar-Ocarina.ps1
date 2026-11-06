@@ -167,6 +167,11 @@ function Atualizar() {
 }
 
 function Exec([string]$exe, [string[]]$argumentos, [switch]$PodeFalhar, [string]$Saida) {
+    # the full path: cmd.exe does not have to search PATH for it
+    if ($exe -notmatch '\\') {
+        $achado = Get-Command $exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($achado) { $exe = $achado.Source }
+    }
     $q = ($argumentos | ForEach-Object { if ($_ -match '[\s&()^]') { '"' + $_ + '"' } else { $_ } }) -join ' '
     $destino = if ($Saida) { "> `"$Saida`"" } else { ">> `"$LOG`"" }
     Registrar "> $exe $q"
@@ -189,9 +194,21 @@ function Exec([string]$exe, [string[]]$argumentos, [switch]$PodeFalhar, [string]
     return $cod
 }
 
+# cmd.exe stops finding programs when PATH is around 8 KB long, while PowerShell still finds them. This keeps each folder once,
+# drops the ones that do not exist, and stops at 7000 characters with what the install needs first.
+function LimparPath([string]$lista) {
+    $vistos = @{}; $saida = New-Object Collections.ArrayList; $tamanho = 0
+    foreach ($item in $lista -split ';') {
+        $d = $item.Trim().Trim('"')
+        if (-not $d -or $vistos.ContainsKey($d.ToLower()) -or -not [IO.Directory]::Exists($d)) { continue }
+        if ($tamanho + $d.Length + 1 -gt 7000) { break }
+        $vistos[$d.ToLower()] = $true; [void]$saida.Add($d); $tamanho += $d.Length + 1
+    }
+    return ($saida -join ';')
+}
 function AtualizarPath() {
     $m = [Environment]::GetEnvironmentVariable('Path', 'Machine'); $u = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:PATH = "$MSYS\ucrt64\bin;$VS;$env:PATH;$m;$u"
+    $env:PATH = LimparPath "$MSYS\ucrt64\bin;$VS;$env:LOCALAPPDATA\Microsoft\WindowsApps;$m;$u;$env:PATH"
 }
 function Tem($c) { return [bool](Get-Command $c -ErrorAction SilentlyContinue) }
 function Winget($id, $override) {
@@ -340,7 +357,7 @@ function Explicar($erro) {
     if ($erro -eq 'VERSAO') { return (L "Este jogo não é a versão 1.1.1, a única que funciona por enquanto.`n`nConfira o arquivo escolhido e tente de novo." "This game is not version 1.1.1, the only one that works for now.`n`nCheck the file you chose and try again.") }
     if ($trecho -match 'No space left|not enough space|espa.o insuficiente|Disk full') { return (L "O disco ficou cheio.`n`nLibere espaço e abra este instalador de novo: ele continua de onde parou." "The disk is full.`n`nFree some space and open this installer again: it picks up where it stopped.") }
     if ($trecho -match 'Could not resolve|Failed to connect|timed out|unable to access|Connection') { return (L "Parece ser um problema de internet.`n`nConfira a conexão e abra este instalador de novo: ele continua de onde parou." "This looks like an internet problem.`n`nCheck your connection and open this installer again: it picks up where it stopped.") }
-    return (L "$erro`n`nAbra o instalador de novo: muitas vezes ele resolve sozinho. Se repetir, abra um pedido de ajuda no GitHub do projeto com o registro da instalação." "$erro`n`nOpen the installer again: this often fixes it. If it happens again, open an issue on the project's GitHub with the install log.")
+    return (L "$erro`n`nAbra o instalador de novo: muitas vezes ele resolve sozinho. Se faltou uma ferramenta, instale à mão pelo passo 1 do guia: github.com/sostenesfreitas/ocarina-recomp/blob/main/docs/compilar-manual.md`n`nSe repetir, abra um pedido de ajuda no GitHub do projeto com o registro da instalação." "$erro`n`nOpen the installer again: this often fixes it. If a tool is missing, install it by hand with step 1 of the guide: github.com/sostenesfreitas/ocarina-recomp/blob/main/docs/build-by-hand.md`n`nIf it happens again, open an issue on the project's GitHub with the install log.")
 }
 
 function Instalar() {
