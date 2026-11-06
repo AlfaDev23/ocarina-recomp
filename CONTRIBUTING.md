@@ -72,6 +72,7 @@ Para abrir o jogo, use `jogar\jogar-ocarina.ps1`.
 | `tools/xlate/patches/` | Patches do tradutor de shaders. A quantidade esperada está em `tools/build_xlate.py` |
 | `tools/oot/` | Partes específicas do Ocarina |
 | `jogar/` | O lançador e a configuração inicial |
+| `verificar.ps1`, `compilar.ps1` | Os scripts de compilação. Ao mudar um comando, mude também os guias em `docs/` |
 
 Os prefixos `TOTK_` e `DKB_` nos nomes vêm dos projetos de origem. Eles continuam assim para o código seguir fácil de comparar com esses projetos. Comentários que citam outros jogos registram onde o comportamento foi descoberto.
 

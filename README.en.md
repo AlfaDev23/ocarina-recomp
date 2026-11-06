@@ -25,7 +25,32 @@ Experimental. It has only been tested on **one PC** (Ryzen 9 9950X3D, RTX 5090),
 
 ## How to build
 
-There is nothing ready to download: the game is built on your PC from your copy. Follow the **[step-by-step build guide](docs/build-by-hand.md)**. All the commands are there, so you can see what each one does before running it.
+There is nothing ready to download: the game is built on your PC from your copy. After installing the tools (step 1 of the [guide](docs/build-by-hand.md)), there are two ways to go.
+
+**With the scripts, which you can read before running:**
+
+```powershell
+git clone https://github.com/sostenesfreitas/ocarina-recomp C:\OcarinaRecomp
+cd C:\OcarinaRecomp
+powershell -ExecutionPolicy Bypass -File .\verificar.ps1 -Jogo "C:\path\your-game.nup"
+powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Simular -Jogo "C:\path\your-game.nup"
+powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\path\your-game.nup"
+```
+
+1. `verificar.ps1` only looks and says what is missing. It changes nothing.
+2. `compilar.ps1 -Simular` shows every command and runs none of them.
+3. `compilar.ps1` runs those commands, shows each one and asks before each step. If it stops, run it again: it continues from where it stopped.
+
+`-ExecutionPolicy Bypass` applies only to that command and does not change your Windows settings.
+
+**Fully by hand:** follow the **[step-by-step build guide](docs/build-by-hand.md)**.
+
+### What this does on your PC
+
+- It does not ask for administrator. Installing the tools in step 1 may, and you run that yourself.
+- It writes only inside the project folder, and never changes your game file.
+- It downloads the Python packages (`tools\requirements.txt`), the shader translator's .NET packages and, if the game's executable is compressed, [zbic](https://github.com/kinnay/zbic).
+- To uninstall, delete the project folder. The tools from step 1 are removed through Windows' apps panel.
 
 It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To update, see the end of the guide.
 

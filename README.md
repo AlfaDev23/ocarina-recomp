@@ -25,7 +25,32 @@ Experimental. Só foi testado em **um PC** (Ryzen 9 9950X3D, RTX 5090), na regi�
 
 ## Como compilar
 
-Não há nada pronto para baixar: o jogo é compilado no seu PC, a partir da sua cópia. Siga o **[passo a passo para compilar](docs/compilar-manual.md)**. Todos os comandos estão lá, para você ver o que cada um faz antes de rodar.
+Não há nada pronto para baixar: o jogo é compilado no seu PC, a partir da sua cópia. Depois de instalar as ferramentas (passo 1 do [guia](docs/compilar-manual.md)), dá para seguir de dois jeitos.
+
+**Com os scripts, que você pode ler antes de rodar:**
+
+```powershell
+git clone https://github.com/sostenesfreitas/ocarina-recomp C:\OcarinaRecomp
+cd C:\OcarinaRecomp
+powershell -ExecutionPolicy Bypass -File .\verificar.ps1 -Jogo "C:\caminho\seu-jogo.nup"
+powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Simular -Jogo "C:\caminho\seu-jogo.nup"
+powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\caminho\seu-jogo.nup"
+```
+
+1. O `verificar.ps1` só olha e diz o que falta. Ele não altera nada.
+2. O `compilar.ps1 -Simular` mostra todos os comandos sem executar nenhum.
+3. O `compilar.ps1` executa esses comandos, mostra cada um e pergunta antes de cada etapa. Se parar, rode de novo: ele continua de onde parou.
+
+`-ExecutionPolicy Bypass` vale só para esse comando e não muda a configuração do Windows.
+
+**Totalmente à mão:** siga o **[passo a passo para compilar](docs/compilar-manual.md)**.
+
+### O que isto faz no seu PC
+
+- Não pede administrador. Instalar as ferramentas do passo 1 pode pedir, e isso é você quem roda.
+- Escreve só dentro da pasta do projeto, e nunca altera o seu arquivo do jogo.
+- Baixa os pacotes Python (`tools\requirements.txt`) e .NET do tradutor de shaders e, se o executável do jogo estiver comprimido, o [zbic](https://github.com/kinnay/zbic).
+- Para desinstalar, apague a pasta do projeto. As ferramentas do passo 1 saem pelo painel de aplicativos do Windows.
 
 Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualizar, veja o fim do guia.
 

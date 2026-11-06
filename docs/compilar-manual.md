@@ -2,7 +2,7 @@
 
 [Read in English](build-by-hand.md)
 
-O jogo é compilado no seu PC, a partir da sua cópia. Estes são todos os passos.
+O jogo é compilado no seu PC, a partir da sua cópia. Estes são todos os passos. Depois do passo 2, o `compilar.ps1` pode rodar os passos 3 a 8 por você: veja o [README](../README.md#como-compilar).
 
 Você precisa da sua própria cópia do jogo na **versão 1.1.1**, de 16 GB de RAM e de 60 GB livres, mais uns 15 GB no disco C: para as ferramentas. Use uma pasta sem espaços nem acentos. Todos os comandos são para o **PowerShell**.
 

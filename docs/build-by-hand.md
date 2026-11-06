@@ -2,7 +2,7 @@
 
 [Leia em português](compilar-manual.md)
 
-The game is built on your PC from your copy. These are all the steps.
+The game is built on your PC from your copy. These are all the steps. After step 2, `compilar.ps1` can run steps 3 to 8 for you: see the [README](../README.en.md#how-to-build).
 
 You need your own copy of the game at **version 1.1.1**, 16 GB of RAM and 60 GB free, plus about 15 GB on C: for the tools. Use a folder with no spaces or accents. All commands are for **PowerShell**.
 
