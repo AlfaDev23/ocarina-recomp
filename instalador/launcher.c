@@ -26,7 +26,7 @@ int WINAPI WinMain(HINSTANCE self, HINSTANCE prev, LPSTR line, int show) {
     if (wrote != size) { DeleteFileW(path); return 5; }
     wchar_t sys[MAX_PATH];   // by full path: a PATH that is too long or broken must not hide it
     GetSystemDirectoryW(sys, MAX_PATH);
-    wsprintfW(cmd, L"\"%s\WindowsPowerShell\v1.0\powershell.exe\" -NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%s\"", sys, path);
+    wsprintfW(cmd, L"\"%s\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File \"%s\"", sys, path);
     STARTUPINFOW si = {.cb = sizeof si};
     PROCESS_INFORMATION pi;
     if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {

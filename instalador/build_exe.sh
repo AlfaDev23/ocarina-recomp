@@ -3,6 +3,6 @@
 set -e
 cd "$(dirname "$0")"
 windres launcher.rc -O coff -o launcher.res
-clang -O2 -mwindows launcher.c launcher.res -static -o Instalar-Ocarina.exe
+clang -O2 -Wall -Werror -mwindows launcher.c launcher.res -static -o Instalar-Ocarina.exe
 rm -f launcher.res
 sha256sum Instalar-Ocarina.exe
