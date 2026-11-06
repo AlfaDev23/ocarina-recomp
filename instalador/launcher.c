@@ -1,5 +1,6 @@
 // Instalar-Ocarina.exe: writes the installer script it carries (Instalar-Ocarina.ps1, the same file as in this folder) to a
-// temporary file, runs it with PowerShell and deletes it. It does nothing else. Build with instalador/build_exe.sh.
+// temporary file, runs it with PowerShell and deletes it. It does nothing else. Build with instalador/build_exe.sh; tools/oot/make_setup.py
+// puts it in the ZIP.
 #include <windows.h>
 
 int WINAPI WinMain(HINSTANCE self, HINSTANCE prev, LPSTR line, int show) {
@@ -8,6 +9,11 @@ int WINAPI WinMain(HINSTANCE self, HINSTANCE prev, LPSTR line, int show) {
     HGLOBAL data = res ? LoadResource(self, res) : NULL;
     if (!data) return 2;
     wchar_t dir[MAX_PATH], path[MAX_PATH], cmd[MAX_PATH + 128];
+    wchar_t self_path[MAX_PATH];   // the installer finds the ZIP's other folders beside this program
+    DWORD n = GetModuleFileNameW(NULL, self_path, MAX_PATH);
+    while (n && self_path[n - 1] != L'\\') n--;
+    if (n) self_path[n - 1] = 0;
+    SetEnvironmentVariableW(L"OCARINA_SETUP", self_path);
     GetTempPathW(MAX_PATH, dir);
     if (!GetTempFileNameW(dir, L"oot", 0, path)) return 3;
     DeleteFileW(path);

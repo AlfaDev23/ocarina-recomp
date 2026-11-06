@@ -57,7 +57,7 @@ if (Test-Path -LiteralPath "$vs\vswhere.exe") {
 Item $cpp (L 'Ferramentas de C++ da Microsoft' "Microsoft's C++ tools") (L 'Veja o passo 1 do guia (docs/compilar-manual.md)' 'See step 1 of the guide (docs/build-by-hand.md)')
 
 $msys = 'C:\msys64\ucrt64\bin'
-$bins = 'clang.exe', 'ninja.exe', 'glslc.exe'
+$bins = 'clang.exe', 'ninja.exe', 'glslc.exe', '..\lib\libdav1d.a'
 $faltando = $bins | Where-Object { -not (Test-Path -LiteralPath "$msys\$_") }
 Item (-not $faltando) (L 'Compilador (MSYS2)' 'Compiler (MSYS2)') (L 'Veja o passo 1 do guia (docs/compilar-manual.md)' 'See step 1 of the guide (docs/build-by-hand.md)')
 

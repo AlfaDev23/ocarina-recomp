@@ -1,17 +1,14 @@
-﻿# Instalador do Ocarina Recomp: uma janela, sem comandos. Instala o que faltar e compila o jogo a partir do arquivo da propria pessoa.
-# Rodar de novo continua de onde parou. Testes: OCARINA_PASTA, OCARINA_JOGO e OCARINA_REPO evitam os dialogos e OCARINA_AUTO=1 inicia sozinho.
+﻿# Instalador do Ocarina Recomp: uma janela, sem comandos, sem administrador e sem instalar nada no Windows. Usa as ferramentas que vem
+# no ZIP e compila o jogo a partir do arquivo da propria pessoa. Tudo fica na pasta de instalacao: para desinstalar, basta apaga-la.
+# Rodar de novo continua de onde parou. Testes: OCARINA_PASTA e OCARINA_JOGO evitam os dialogos e OCARINA_AUTO=1 inicia sozinho.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 
-$REPO = if ($env:OCARINA_REPO) { $env:OCARINA_REPO } else { 'https://github.com/sostenesfreitas/ocarina-recomp' }
-$RAMO = if ($env:OCARINA_RAMO) { $env:OCARINA_RAMO } else { 'main' }
+$SETUP = $env:OCARINA_SETUP   # the folder of Instalar-Ocarina.exe, set by instalador/launcher.c
 $HASH_MAIN = 'F90499EEB596D67C730FAC9B7E247B3A46D51D6F334C767AEF071C9A783CCCEF'   # o main da versao 1.1.1, sem compressao
-$ZBIC = '11b08f2712264bbed731545085cbd9702096ceb7'
-$GB_NECESSARIOS = 60
+$GB_NECESSARIOS = 40
 $LOG = Join-Path $env:TEMP 'ocarina-instalador.log'
-$MSYS = 'C:\msys64'
-$VS = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer'
 $TIGELA = [char]::ConvertFromUtf32(0x1F35C)
 
 $PT = (Get-UICulture).TwoLetterISOLanguageName -eq 'pt'
@@ -63,7 +60,7 @@ $form.Controls.AddRange(@($titulo, $sub))
 # Tela 1: escolher o jogo
 $tela1 = New-Object Windows.Forms.Panel
 $tela1.SetBounds(0, 86, 640, 430)
-$t1a = Rotulo (L "O que este instalador faz:`n`n  1. Instala as ferramentas que faltarem (o Windows pode pedir permissão: clique em Sim).`n  2. Monta o jogo no seu PC a partir do SEU arquivo do jogo.`n  3. Cria um atalho na Área de Trabalho.`n`nLeva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso." "What this installer does:`n`n  1. Installs any tools you are missing (Windows may ask for permission: click Yes).`n  2. Builds the game on your PC from YOUR copy of the game.`n  3. Creates a shortcut on your desktop.`n`nIt takes 30 minutes to 2 hours, and you can use your PC in the meantime.") 26 0 590 130
+$t1a = Rotulo (L "O que este instalador faz:`n`n  1. Copia as ferramentas que vêm no ZIP para a pasta de instalação. Não instala nada no Windows.`n  2. Monta o jogo no seu PC a partir do SEU arquivo do jogo.`n  3. Cria um atalho na Área de Trabalho.`n`nLeva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para desinstalar, apague a pasta." "What this installer does:`n`n  1. Copies the tools from the ZIP to the install folder. It installs nothing in Windows.`n  2. Builds the game on your PC from YOUR copy of the game.`n  3. Creates a shortcut on your desktop.`n`nIt takes 30 minutes to 2 hours, and you can use your PC in the meantime. To uninstall, delete the folder.") 26 0 590 130
 $t1b = Rotulo (L 'Passo 1: mostre onde está o seu jogo (versão 1.1.1)' 'Step 1: show where your game is (version 1.1.1)') 26 136 590 24 11 $true
 $btArq = Botao (L 'Escolher arquivo .nup' 'Choose .nup file') 26 164 280
 $btPasta = Botao (L 'Escolher pasta com exefs e romfs' 'Choose folder with exefs and romfs') 322 164 292
@@ -194,80 +191,25 @@ function Exec([string]$exe, [string[]]$argumentos, [switch]$PodeFalhar, [string]
     return $cod
 }
 
-# cmd.exe stops finding programs when PATH is around 8 KB long, while PowerShell still finds them. This keeps each folder once,
-# drops the ones that do not exist, and stops at 7000 characters with what the install needs first.
-function LimparPath([string]$lista) {
-    $vistos = @{}; $saida = New-Object Collections.ArrayList; $tamanho = 0
-    foreach ($item in $lista -split ';') {
-        $d = $item.Trim().Trim('"')
-        if (-not $d -or $vistos.ContainsKey($d.ToLower()) -or -not [IO.Directory]::Exists($d)) { continue }
-        if ($tamanho + $d.Length + 1 -gt 7000) { break }
-        $vistos[$d.ToLower()] = $true; [void]$saida.Add($d); $tamanho += $d.Length + 1
-    }
-    return ($saida -join ';')
-}
+function Ferramenta($sub) { return Join-Path $script:pasta "ferramentas\$sub" }
+# The bundled tools and the Windows system folders, nothing from the PC: a long PATH or another compiler cannot get in the way.
 function AtualizarPath() {
-    $m = [Environment]::GetEnvironmentVariable('Path', 'Machine'); $u = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:PATH = LimparPath "$MSYS\ucrt64\bin;$VS;$env:LOCALAPPDATA\Microsoft\WindowsApps;$m;$u;$env:PATH"
-}
-function Tem($c) { return [bool](Get-Command $c -ErrorAction SilentlyContinue) }
-function Winget($id, $override) {
-    $a = @('install', '--id', $id, '-e', '--silent', '--accept-source-agreements', '--accept-package-agreements')
-    if ($override) { $a += @('--override', $override) }
-    Exec 'winget' $a -PodeFalhar | Out-Null
-    AtualizarPath
-}
-function TemCpp() {
-    if (-not (Test-Path "$VS\vswhere.exe")) { return $false }
-    $vc = & "$VS\vswhere.exe" -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    return ([bool]$vc -and (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Lib\*\um\x64\kernel32.lib"))
-}
-
-# ---- os passos: nome, minutos estimados e o que fazem
-function P-Ferramentas() {
-    AtualizarPath
-    if (-not (Tem 'winget')) { throw 'WINGET' }
-    if (-not (Tem 'git')) { Winget 'Git.Git' }
-    if ((Exec 'py' @('-3.12', '--version') -PodeFalhar) -ne 0) { Winget 'Python.Python.3.12' }
-    if (-not (Test-Path "$MSYS\usr\bin\bash.exe")) { Winget 'MSYS2.MSYS2' }
-    if (-not (TemCpp)) {
-        $existente = if (Test-Path "$VS\vswhere.exe") { & "$VS\vswhere.exe" -latest -prerelease -products '*' -property installationPath } else { $null }
-        if ($existente) {
-            $a = "modify --installPath `"$existente`" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --quiet --norestart --force"
-            $p = Start-Process "$VS\setup.exe" -ArgumentList $a -Verb RunAs -PassThru
-            while (-not $p.HasExited) { Atualizar; Start-Sleep -Milliseconds 200 }
-        } else {
-            Winget 'Microsoft.VisualStudio.BuildTools' '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
-        }
-        if (-not (TemCpp)) { throw 'CPP' }
-    }
-    $sdks = (Tem 'dotnet') -and (& dotnet --list-sdks | Select-String '^10\.')
-    if (-not $sdks) { Winget 'Microsoft.DotNet.SDK.10' }
-    foreach ($c in 'git', 'py', 'dotnet') { if (-not (Tem $c)) { throw (L "A ferramenta '$c' não foi instalada." "The tool '$c' was not installed.") } }
-    if (-not (Test-Path "$MSYS\usr\bin\bash.exe")) { throw (L 'O MSYS2 não foi instalado.' 'MSYS2 was not installed.') }
-}
-function P-Compilador() {
-    $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
-    $bash = "$MSYS\usr\bin\bash.exe"
-    if (-not (Test-Path "$MSYS\ucrt64\bin\clang.exe")) {
-        # a primeira atualizacao pode fechar o proprio MSYS2: por isso duas vezes e sem parar no codigo de saida
-        Exec $bash @('-lc', 'pacman -Syuu --noconfirm') -PodeFalhar | Out-Null
-        Exec $bash @('-lc', 'pacman -Syuu --noconfirm') -PodeFalhar | Out-Null
-    }
-    Exec $bash @('-lc', 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip') | Out-Null
-    AtualizarPath
+    $win = $env:SystemRoot
+    $env:PATH = "$(Ferramenta 'bin');$(Ferramenta 'llvm\bin');$win\System32;$win;$win\System32\Wbem;$win\System32\WindowsPowerShell\v1.0"
     $env:PYTHONUTF8 = '1'
 }
-function P-Codigo() {
-    if (Test-Path (Join-Path $script:pasta '.git')) {
-        Exec 'git' @('-C', $script:pasta, 'pull', '--ff-only') | Out-Null
-    } else {
-        Exec 'git' @('clone', '-b', $RAMO, $REPO, $script:pasta) | Out-Null
+# ---- os passos: nome, minutos estimados e o que fazem
+function P-Copiar() {
+    # robocopy: fewer than 8 is success. /MIR on the project would delete the game's build output, so it only adds and replaces.
+    foreach ($par in @(@('projeto', $script:pasta), @('ferramentas', (Join-Path $script:pasta 'ferramentas')))) {
+        $cod = Exec 'robocopy.exe' @((Join-Path $SETUP $par[0]), $par[1], '/E', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/R:2', '/W:2') -PodeFalhar
+        if ($cod -ge 8) { throw (L "Não consegui copiar os arquivos para $($script:pasta)." "Could not copy the files to $($script:pasta).") }
     }
-    $venv = Join-Path $script:pasta '.venv\Scripts\python.exe'
-    if (-not (Test-Path $venv)) { Exec 'py' @('-3.12', '-m', 'venv', (Join-Path $script:pasta '.venv')) | Out-Null }
-    Exec $venv @('-m', 'pip', 'install', '-q', '--disable-pip-version-check', '-r', (Join-Path $script:pasta 'tools\requirements.txt')) | Out-Null
-    $script:py = $venv
+    AtualizarPath
+    $script:py = Ferramenta 'python\python.exe'
+    # the translator goes where the game looks for it, as tools/build_xlate.py leaves it
+    New-Item -ItemType Directory -Force (Build 'xlate') | Out-Null
+    foreach ($f in 'totk_xlate.exe', 'totk_xlate.id') { Copy-Item -LiteralPath (Ferramenta "bin\$f") -Destination (Build "xlate\$f") -Force }
 }
 function Build($sub) { return Join-Path $script:pasta "build\$sub" }
 
@@ -292,17 +234,12 @@ function P-Exefs() {
     New-Item -ItemType Directory -Force $exefs | Out-Null
     Get-ChildItem -LiteralPath $origem -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $exefs $_.Name) -Force }
     if ((Get-FileHash "$exefs\main").Hash -ne $HASH_MAIN) {
-        # o main costuma vir comprimido com ZBIC: descomprime com o codigo aberto do zbic
-        $zb = Build 'zbic'
-        if (-not (Test-Path "$zb\.git")) { Exec 'git' @('clone', 'https://github.com/kinnay/zbic', $zb) | Out-Null }
-        Exec 'git' @('-C', $zb, 'checkout', '-q', $ZBIC) | Out-Null
-        Exec "$MSYS\ucrt64\bin\clang.exe" @('-O2', '-w', "-I$zb\src", 'tools\oot\unzbic.c', '-o', (Build 'unzbic.exe')) | Out-Null
-        Exec (Build 'unzbic.exe') @("$origem\main", "$exefs\main") -PodeFalhar | Out-Null
+        # o main costuma vir comprimido com ZBIC
+        Exec (Ferramenta 'bin\unzbic.exe') @("$origem\main", "$exefs\main") -PodeFalhar | Out-Null
         if ((Get-FileHash "$exefs\main").Hash -ne $HASH_MAIN) { throw 'VERSAO' }
     }
     if ($script:jogoNup) { Remove-Item (Build 'dump') -Recurse -Force }
 }
-function P-Tradutor() { Exec $script:py @('tools\build_xlate.py') | Out-Null }
 function P-Gerar() {
     Exec $script:py @('recomp\gen.py', '--exefs', (Build 'exefs'), '--out', 'generated\oot111', '--modules', 'main,sdk,subsdk0') | Out-Null
     Exec $script:py @('tools\oot\patch_generated.py', 'generated\oot111') | Out-Null
@@ -322,7 +259,7 @@ function P-Romfs() {
 function P-Exe() {
     $ramGb = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
     $jobs = [Math]::Max(2, [Math]::Min([Environment]::ProcessorCount, [int]($ramGb / 3)))
-    Exec $script:py @('tools\build_game.py', '--version', 'oot111', '--gen', 'generated\oot111', '--out', (Build 'oot111'), '--expected', 'tools\data\expected-oot111.json', '--exefs', (Build 'exefs'), '--romfs', (Build 'romfs'), '--jobs', "$jobs") | Out-Null
+    Exec $script:py @('tools\build_game.py', '--version', 'oot111', '--gen', 'generated\oot111', '--out', (Build 'oot111'), '--expected', 'tools\data\expected-oot111.json', '--exefs', (Build 'exefs'), '--romfs', (Build 'romfs'), '--jobs', "$jobs", '--toolchain', (Ferramenta 'llvm'), '--deps', (Ferramenta 'deps'), '--ninja', (Ferramenta 'bin\ninja.exe')) | Out-Null
 }
 function P-Finalizar() {
     $ini = Build 'oot111\totk.ini'
@@ -338,11 +275,8 @@ function P-Finalizar() {
 }
 
 $PASSOS = @(
-    @((L 'Instalar ferramentas' 'Install tools'), 20, 'P-Ferramentas'),
-    @((L 'Preparar o compilador' 'Prepare the compiler'), 8, 'P-Compilador'),
-    @((L 'Baixar o Ocarina Recomp' 'Download Ocarina Recomp'), 3, 'P-Codigo'),
+    @((L 'Copiar as ferramentas' 'Copy the tools'), 3, 'P-Copiar'),
     @((L 'Conferir o seu jogo' 'Check your game'), 2, 'P-Exefs'),
-    @((L 'Compilar o tradutor de shaders' 'Build the shader translator'), 5, 'P-Tradutor'),
     @((L 'Converter o código do jogo' 'Convert the game code'), 2, 'P-Gerar'),
     @((L 'Preparar os arquivos do jogo' 'Prepare the game files'), 25, 'P-Romfs'),
     @((L 'Compilar o jogo (a parte mais demorada)' 'Build the game (the longest part)'), 35, 'P-Exe'),
@@ -352,12 +286,10 @@ $PASSOS = @(
 function Explicar($erro) {
     $trecho = ''
     try { $trecho = (Get-Content $LOG -Tail 40 -ErrorAction SilentlyContinue) -join "`n" } catch {}
-    if ($erro -eq 'WINGET') { return (L "O Windows não tem o 'Instalador de Aplicativo'.`n`nAbra a Microsoft Store, procure por 'Instalador de Aplicativo', atualize e abra este instalador de novo." "Windows does not have the 'App Installer'.`n`nOpen the Microsoft Store, search for 'App Installer', update it and open this installer again.") }
-    if ($erro -eq 'CPP') { return (L "Faltam as ferramentas de C++ da Microsoft.`n`nAbra o 'Visual Studio Installer', clique em Modificar, marque 'Desenvolvimento para desktop com C++', instale e abra este instalador de novo." "Microsoft's C++ tools are missing.`n`nOpen the 'Visual Studio Installer', click Modify, select 'Desktop development with C++', install it and open this installer again.") }
     if ($erro -eq 'VERSAO') { return (L "Este jogo não é a versão 1.1.1, a única que funciona por enquanto.`n`nConfira o arquivo escolhido e tente de novo." "This game is not version 1.1.1, the only one that works for now.`n`nCheck the file you chose and try again.") }
     if ($trecho -match 'No space left|not enough space|espa.o insuficiente|Disk full') { return (L "O disco ficou cheio.`n`nLibere espaço e abra este instalador de novo: ele continua de onde parou." "The disk is full.`n`nFree some space and open this installer again: it picks up where it stopped.") }
     if ($trecho -match 'Could not resolve|Failed to connect|timed out|unable to access|Connection') { return (L "Parece ser um problema de internet.`n`nConfira a conexão e abra este instalador de novo: ele continua de onde parou." "This looks like an internet problem.`n`nCheck your connection and open this installer again: it picks up where it stopped.") }
-    return (L "$erro`n`nAbra o instalador de novo: muitas vezes ele resolve sozinho. Se faltou uma ferramenta, instale à mão pelo passo 1 do guia: github.com/sostenesfreitas/ocarina-recomp/blob/main/docs/compilar-manual.md`n`nSe repetir, abra um pedido de ajuda no GitHub do projeto com o registro da instalação." "$erro`n`nOpen the installer again: this often fixes it. If a tool is missing, install it by hand with step 1 of the guide: github.com/sostenesfreitas/ocarina-recomp/blob/main/docs/build-by-hand.md`n`nIf it happens again, open an issue on the project's GitHub with the install log.")
+    return (L "$erro`n`nAbra o instalador de novo: muitas vezes ele resolve sozinho. Se repetir, abra um pedido de ajuda no GitHub do projeto com o registro da instalação." "$erro`n`nOpen the installer again: this often fixes it. If it happens again, open an issue on the project's GitHub with the install log.")
 }
 
 function Instalar() {
@@ -470,7 +402,13 @@ if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64') { $script:avisos += (L 'Este instal
 $ram = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
 if ($ram -lt 15) { $script:avisos += (L "Este PC tem $ram GB de RAM. Com menos de 16 GB, nunca testamos: a compilação ou o jogo podem falhar." "This PC has $ram GB of RAM. We never tested with less than 16 GB: the build or the game may fail.") }
 $gpus = (Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -join ', '
+Add-Type -Namespace Ocarina -Name Cpu -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint f);'
+if (-not [Ocarina.Cpu]::IsProcessorFeaturePresent(40)) { $script:avisos += (L 'Este processador não tem AVX2, então o jogo não deve funcionar.' 'This processor has no AVX2, so the game should not work.'); $script:bloqueio = $true }
 if ($gpus -notmatch 'NVIDIA') { $script:avisos += (L "Só testamos em placa NVIDIA. Sua placa ($gpus) pode não funcionar." "We only tested on NVIDIA cards. Your card ($gpus) may not work.") }
+if (-not $SETUP -or -not (Test-Path -LiteralPath (Join-Path $SETUP 'ferramentas\python\python.exe'))) {
+    $script:avisos += (L 'Extraia o ZIP inteiro para uma pasta e abra o instalador de dentro dela.' 'Unpack the whole ZIP to a folder and open the installer from inside it.')
+    $script:bloqueio = $true
+}
 Validar
 if ($env:OCARINA_JOGO) { EscolherJogo $env:OCARINA_JOGO }
 if ($env:OCARINA_AUTO) { if (-not $script:jogo) { throw 'OCARINA_JOGO: jogo nao encontrado' }; $form.add_Shown({ Instalar }) }
