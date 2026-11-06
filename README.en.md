@@ -35,6 +35,8 @@ You do not need to type any commands.
 
 The installer shows English unless your Windows is in Portuguese. Installation takes 30 minutes to 2 hours, and you can use your PC in the meantime. If the window closes or the power goes out, open the installer again: it picks up where it stopped. To update the game, just run the installer again.
 
+Prefer to do it all yourself? Follow the [step-by-step guide to build by hand](docs/build-by-hand.md).
+
 ### What you need
 
 - 64-bit Windows 10 or 11, with an AVX2-capable processor.

@@ -35,6 +35,8 @@ Você não precisa digitar nenhum comando.
 
 A instalação leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Se fechar a janela ou faltar luz, abra o instalador de novo: ele continua de onde parou. Para atualizar o jogo, é só rodar o instalador outra vez.
 
+Prefere fazer tudo à mão? Siga o [passo a passo para compilar à mão](docs/compilar-manual.md).
+
 ### Do que você precisa
 
 - Windows 10 ou 11 de 64 bits, com processador compatível com AVX2.
