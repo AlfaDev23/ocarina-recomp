@@ -62,7 +62,7 @@ New-Item -ItemType Directory -Force build\exefs
 Copy-Item build\dump\exefs\* build\exefs -Force
 ```
 
-**If your game is a folder**, copy its `exefs` to `build\exefs`, using `-LiteralPath` if the path has brackets:
+**If your game is a folder**, copy its `exefs` to `build\exefs`. If the path has brackets, rename the folder first, because PowerShell treats them as wildcards:
 
 ```powershell
 New-Item -ItemType Directory -Force build\exefs
