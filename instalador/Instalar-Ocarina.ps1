@@ -126,7 +126,12 @@ $form.add_KeyPress({
 $rodape.add_Click({ $script:cliques++; if ($script:cliques -eq 5) { $script:cliques = 0; Segredo } })
 
 # ---- mostrar o andamento e rodar programas sem janela preta
-function Registrar($t) { Add-Content -Path $LOG -Value "[$(Get-Date -Format 'HH:mm:ss')] $t" -Encoding UTF8 }
+# The log may be held for a moment by a program that just wrote to it: losing one line must not stop the install.
+function Registrar($t) {
+    foreach ($tentativa in 1..20) {
+        try { [IO.File]::AppendAllText($LOG, "[$(Get-Date -Format 'HH:mm:ss')] $t`r`n"); return } catch { Start-Sleep -Milliseconds 100 }
+    }
+}
 
 function UltimaLinha() {
     try {
@@ -156,7 +161,7 @@ function Atualizar() {
     $total = $script:feito + $script:pesoAtual * $frac
     $barra.Value = [Math]::Min(1000, [int](1000 * $total))
     $lbPct.Text = (L '{0:0}% concluído' '{0:0}% done') -f (100 * $total)
-    $dica = [int]([DateTime]::Now.Ticks / 10000000 / 25) % $DICAS.Count
+    $dica = [int]([long]([DateTime]::Now.Ticks / 250000000) % $DICAS.Count)
     $lbDica.Text = $DICAS[$dica]
     [Windows.Forms.Application]::DoEvents()
 }
