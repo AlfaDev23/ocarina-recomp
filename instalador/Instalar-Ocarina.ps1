@@ -273,7 +273,7 @@ function P-Exefs() {
         $origem = Join-Path $script:jogo 'exefs'
     }
     New-Item -ItemType Directory -Force $exefs | Out-Null
-    Copy-Item "$origem\*" $exefs -Force
+    Get-ChildItem -LiteralPath $origem -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $exefs $_.Name) -Force }
     if ((Get-FileHash "$exefs\main").Hash -ne $HASH_MAIN) {
         # o main costuma vir comprimido com ZBIC: descomprime com o codigo aberto do zbic
         $zb = Build 'zbic'
@@ -392,19 +392,20 @@ function Validar() {
     $unid = $script:pasta.Substring(0, 1)
     $livre = [Math]::Floor((Get-PSDrive $unid).Free / 1GB)
     $parcial = Test-Path (Join-Path $script:pasta 'build\romfs\index.json')
-    if ($script:pasta -match '[^\x21-\x7E]') { $problema += (L 'A pasta de instalação não pode ter espaços nem acentos.' 'The install folder cannot have spaces or accents.') }
+    if ($script:pasta -match '[^\x21-\x7E]|[\[\]%&]') { $problema += (L 'A pasta de instalação não pode ter espaços nem acentos.' 'The install folder cannot have spaces or accents.') }
     elseif (-not $parcial -and $livre -lt $GB_NECESSARIOS) { $problema += (L "Faltam $($GB_NECESSARIOS - $livre) GB livres em ${unid}: (precisa de $GB_NECESSARIOS GB)." "You need $($GB_NECESSARIOS - $livre) GB more free on ${unid}: ($GB_NECESSARIOS GB required).") }
     $lbPasta.Text = (L "$($script:pasta)   ($livre GB livres)" "$($script:pasta)   ($livre GB free)")
     $lbAviso.Text = ($problema + $script:avisos) -join "`n"
     $btInstalar.Enabled = ($problema.Count -eq 0) -and [bool]$script:jogo -and -not $script:bloqueio
 }
 function EscolherJogo([string]$c) {
-    if ($c -match '\.nup$' -and (Test-Path $c -PathType Leaf)) {
+    # -LiteralPath: game files are often named with [title id], and [ ] are wildcards to the plain -Path
+    if ($c -match '\.nup$' -and (Test-Path -LiteralPath $c -PathType Leaf)) {
         $script:jogo = $c; $script:jogoNup = $true
         $lbJogo.Text = (L "Jogo: $c" "Game: $c"); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen
     } else {
-        $b = if (Test-Path (Join-Path $c 'base\exefs\main')) { Join-Path $c 'base' } else { $c }
-        if ((Test-Path (Join-Path $b 'exefs\main')) -and (Test-Path (Join-Path $b 'romfs'))) {
+        $b = if (Test-Path -LiteralPath (Join-Path $c 'base\exefs\main')) { Join-Path $c 'base' } else { $c }
+        if ((Test-Path -LiteralPath (Join-Path $b 'exefs\main')) -and (Test-Path -LiteralPath (Join-Path $b 'romfs'))) {
             $script:jogo = $b; $script:jogoNup = $false
             $lbJogo.Text = (L "Jogo: $b" "Game: $b"); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen
         } else {
@@ -455,7 +456,7 @@ $gpus = (Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -jo
 if ($gpus -notmatch 'NVIDIA') { $script:avisos += (L "Só testamos em placa NVIDIA. Sua placa ($gpus) pode não funcionar." "We only tested on NVIDIA cards. Your card ($gpus) may not work.") }
 Validar
 if ($env:OCARINA_JOGO) { EscolherJogo $env:OCARINA_JOGO }
-if ($env:OCARINA_AUTO) { $form.add_Shown({ Instalar }) }
+if ($env:OCARINA_AUTO) { if (-not $script:jogo) { throw 'OCARINA_JOGO: jogo nao encontrado' }; $form.add_Shown({ Instalar }) }
 
 try { [void][Windows.Forms.Application]::Run($form) }
 catch {
