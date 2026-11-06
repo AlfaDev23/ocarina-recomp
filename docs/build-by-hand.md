@@ -1,8 +1,8 @@
-# Build by hand
+# How to build
 
 [Leia em português](compilar-manual.md)
 
-These are the same steps the installer runs, for anyone who prefers to see and control each one. If you just want to play, use the [installer](../README.en.md#how-to-install).
+The game is built on your PC from your copy. These are all the steps.
 
 You need your own copy of the game at **version 1.1.1**, 16 GB of RAM and 60 GB free, plus about 15 GB on C: for the tools. Use a folder with no spaces or accents. All commands are for **PowerShell**.
 
@@ -124,17 +124,17 @@ Remove-Item build\dump -Recurse -Force
 
 ## 8. Build the game
 
-This is the longest part. With little RAM, use a lower `--jobs`: the installer uses at most 1 for every 3 GB.
+This is the longest part. With little RAM, use a lower `--jobs`: at most 1 for every 3 GB.
 
 ```powershell
 .venv\Scripts\python.exe tools\build_game.py --version oot111 --gen generated\oot111 --out build\oot111 --expected tools\data\expected-oot111.json --exefs build\exefs --romfs build\romfs --jobs 8
-Copy-Item instalador\totk.ini build\oot111\totk.ini
+Copy-Item jogar\totk.ini build\oot111\totk.ini
 ```
 
 ## 9. Play
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File instalador\jogar-ocarina.ps1
+powershell -ExecutionPolicy Bypass -File jogar\jogar-ocarina.ps1
 ```
 
 The first launch takes a while, and new areas may stutter a little while shaders are prepared.

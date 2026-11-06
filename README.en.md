@@ -23,19 +23,11 @@ Experimental. It has only been tested on **one PC** (Ryzen 9 9950X3D, RTX 5090),
 | Hyrule Field and the rest of the game | ❓ Not tested yet |
 | AMD and Intel cards | ❓ Never tested |
 
-## How to install
+## How to build
 
-You do not need to type any commands.
+There is nothing ready to download: the game is built on your PC from your copy. Follow the **[step-by-step build guide](docs/build-by-hand.md)**. All the commands are there, so you can see what each one does before running it.
 
-1. Download **[Instalar-Ocarina.bat](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest/download/Instalar-Ocarina.bat)**.
-2. Double-click it. If Windows says it protected your PC, click **More info** and then **Run anyway**.
-3. In the window, choose your game's `.nup` file (or a folder with `exefs` and `romfs`) and click **Install**.
-4. When Windows asks for permission to install the tools, click **Yes**.
-5. At the end, click **Play**, or use the **Ocarina Recomp** shortcut on your desktop.
-
-The installer shows English unless your Windows is in Portuguese. Installation takes 30 minutes to 2 hours, and you can use your PC in the meantime. If the window closes or the power goes out, open the installer again: it picks up where it stopped. To update the game, just run the installer again.
-
-Prefer to do it all yourself? Follow the [step-by-step guide to build by hand](docs/build-by-hand.md).
+It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To update, see the end of the guide.
 
 ### What you need
 
@@ -50,12 +42,11 @@ Prefer to do it all yourself? Follow the [step-by-step guide to build by hand](d
 
 | Problem | What to do |
 |---|---|
-| The installer stopped with an error | Open it again: it picks up where it stopped and this often fixes it |
 | "This game is not version 1.1.1" | Check that you chose the right, updated game |
 | The game opens and closes | Update your graphics driver and look at `ultima-partida-erros.log` in the install folder |
 | Stutter the first time | This is normal: shaders are being prepared. It gets better when you pass through the same place again |
 
-If the problem continues, [open an issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) with the log at `%TEMP%\ocarina-instalador.log` and your graphics card model. Never send game files.
+If the problem continues, [open an issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) with the error message and your graphics card model. Never send game files.
 
 ### Controls
 
@@ -74,7 +65,7 @@ Read the **[contributing guide](CONTRIBUTING.en.md)**. Testing on other graphics
 
 ## Credits
 
-Maintained by **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Word is he left a hidden message in the installer and another one inside the game. 🍜
+Maintained by **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Word is he left a hidden message inside the game. 🍜
 
 This project exists thanks to the work of many people:
 

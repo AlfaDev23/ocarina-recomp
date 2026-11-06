@@ -1,8 +1,8 @@
-# Compilar à mão
+# Como compilar
 
 [Read in English](build-by-hand.md)
 
-Estes são os mesmos passos que o instalador faz, para quem prefere ver e controlar cada um. Se você só quer jogar, use o [instalador](../README.md#como-instalar).
+O jogo é compilado no seu PC, a partir da sua cópia. Estes são todos os passos.
 
 Você precisa da sua própria cópia do jogo na **versão 1.1.1**, de 16 GB de RAM e de 60 GB livres, mais uns 15 GB no disco C: para as ferramentas. Use uma pasta sem espaços nem acentos. Todos os comandos são para o **PowerShell**.
 
@@ -124,17 +124,17 @@ Remove-Item build\dump -Recurse -Force
 
 ## 8. Compile o jogo
 
-É a parte mais demorada. Com pouca RAM, use um `--jobs` menor: o instalador usa no máximo 1 para cada 3 GB.
+É a parte mais demorada. Com pouca RAM, use um `--jobs` menor: no máximo 1 para cada 3 GB.
 
 ```powershell
 .venv\Scripts\python.exe tools\build_game.py --version oot111 --gen generated\oot111 --out build\oot111 --expected tools\data\expected-oot111.json --exefs build\exefs --romfs build\romfs --jobs 8
-Copy-Item instalador\totk.ini build\oot111\totk.ini
+Copy-Item jogar\totk.ini build\oot111\totk.ini
 ```
 
 ## 9. Jogue
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File instalador\jogar-ocarina.ps1
+powershell -ExecutionPolicy Bypass -File jogar\jogar-ocarina.ps1
 ```
 
 A primeira abertura demora, e áreas novas podem dar umas travadinhas enquanto os shaders são preparados.

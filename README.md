@@ -23,19 +23,11 @@ Experimental. Só foi testado em **um PC** (Ryzen 9 9950X3D, RTX 5090), na regi�
 | Hyrule Field e o resto do jogo | ❓ Ainda não testados |
 | Placas AMD e Intel | ❓ Nunca testadas |
 
-## Como instalar
+## Como compilar
 
-Você não precisa digitar nenhum comando.
+Não há nada pronto para baixar: o jogo é compilado no seu PC, a partir da sua cópia. Siga o **[passo a passo para compilar](docs/compilar-manual.md)**. Todos os comandos estão lá, para você ver o que cada um faz antes de rodar.
 
-1. Baixe o **[Instalar-Ocarina.bat](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest/download/Instalar-Ocarina.bat)**.
-2. Dê dois cliques nele. Se o Windows avisar que protegeu o PC, clique em **Mais informações** e depois em **Executar assim mesmo**.
-3. Na janela, escolha o arquivo `.nup` do seu jogo (ou uma pasta com `exefs` e `romfs`) e clique em **Instalar**.
-4. Quando o Windows pedir permissão para instalar as ferramentas, clique em **Sim**.
-5. No fim, clique em **Jogar**, ou use o atalho **Ocarina Recomp** na Área de Trabalho.
-
-A instalação leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Se fechar a janela ou faltar luz, abra o instalador de novo: ele continua de onde parou. Para atualizar o jogo, é só rodar o instalador outra vez.
-
-Prefere fazer tudo à mão? Siga o [passo a passo para compilar à mão](docs/compilar-manual.md).
+Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualizar, veja o fim do guia.
 
 ### Do que você precisa
 
@@ -50,12 +42,11 @@ Prefere fazer tudo à mão? Siga o [passo a passo para compilar à mão](docs/co
 
 | Problema | O que fazer |
 |---|---|
-| O instalador parou com erro | Abra de novo: ele continua de onde parou e muitas vezes resolve sozinho |
 | "Este jogo não é a versão 1.1.1" | Confira se escolheu o jogo certo e atualizado |
 | O jogo abre e fecha | Atualize o driver da placa de vídeo e veja o arquivo `ultima-partida-erros.log` na pasta de instalação |
 | Travadinhas na primeira vez | É normal: os shaders estão sendo preparados. Melhora quando você passa de novo pelo mesmo lugar |
 
-Se continuar, [abra uma issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) com o registro `%TEMP%\ocarina-instalador.log` e o modelo da sua placa de vídeo. Nunca envie arquivos do jogo.
+Se continuar, [abra uma issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) com a mensagem de erro e o modelo da sua placa de vídeo. Nunca envie arquivos do jogo.
 
 ### Controles
 
@@ -74,7 +65,7 @@ Leia o **[guia de contribuição](CONTRIBUTING.md)**. Testar em outras placas de
 
 ## Créditos
 
-Projeto mantido por **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Dizem que ele deixou um recado escondido no instalador e outro dentro do jogo. 🍜
+Projeto mantido por **Miojo** ([sostenesfreitas](https://github.com/sostenesfreitas)). Dizem que ele deixou um recado escondido dentro do jogo. 🍜
 
 Este projeto existe graças ao trabalho de muita gente:
 
