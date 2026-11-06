@@ -70,7 +70,7 @@
 # lod_guard = 1
 # Fill the driver-reserved constant bank c0 (storage sizes, dispatch size, point size, base instance) instead of zeros.
 # fix_c0 = 1
-# Bananza on NVIDIA: skip the light-quad draws that fault the GPU after the first guide movie (#9).
+# On NVIDIA: skip the light-quad draws that fault the GPU after the first guide movie (#9).
 # fix_vs_fault = 1
 # New GPU memory pools start zero-filled, as Switch memory does.
 # fix_zero = 1

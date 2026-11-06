@@ -27,6 +27,8 @@ void rec_stats_log(void);             // TOTK_TRACE=perf: packets, bytes, drains
 void rec_crumb(VkCommandBuffer cb, int kind, uint64_t n);   // vk_crumb in order with this command buffer's packets
 void rec_push_tpl(PFN_vkCmdPushDescriptorSetWithTemplateKHR fn, VkCommandBuffer cb, VkDescriptorUpdateTemplate tpl,
                   VkPipelineLayout layout, uint32_t set, const void *data, uint32_t bytes);   // data: bytes read by tpl
+void rec_mesh(PFN_vkCmdDrawMeshTasksEXT fn, VkCommandBuffer cb, uint32_t x, uint32_t y, uint32_t z);
+void rec_mesh_ind(PFN_vkCmdDrawMeshTasksIndirectEXT fn, VkCommandBuffer cb, VkBuffer b, VkDeviceSize o, uint32_t n, uint32_t stride);
 void rec_push(PFN_vkCmdPushDescriptorSetKHR fn, VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout,
               uint32_t set, uint32_t n, const VkWriteDescriptorSet *w);
 void rec_vertex_input(PFN_vkCmdSetVertexInputEXT fn, VkCommandBuffer cb, uint32_t nb,

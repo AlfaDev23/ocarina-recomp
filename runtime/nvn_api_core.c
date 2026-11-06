@@ -169,7 +169,7 @@ static int pool_gpu_visible(const pool_t *o) { return !(o->flags & NVN_MEMORY_PO
 static const int devinfo[] = {   // Tegra X1 values (nnheaders nvn_DeviceConstantsNX.h, measured on SMO)
     // ABI: Donkey Kong Bananza (NVN 2) requires major 231 and minor >= 16 (main+0x5b29a4, the check before the sead
     // graphics set-up); TotK required 55 and >= 15. The rest are still the Tegra X1 values.
-    [0x00] = 231, [0x01] = 16,
+    [0x00] = 231, [0x01] = 40,   // LOCAL TEST: Ocarina requires minor >= 40
     [0x02] = 14, [0x03] = 65536, [0x04] = 256, [0x05] = 8, [0x06] = 16, [0x07] = 4, [0x08] = 16, [0x09] = 32,
     [0x0A] = 16, [0x0B] = 4, [0x0C] = 4, [0x0D] = 4, [0x0E] = 16, [0x0F] = 32, [0x10] = 32, [0x11] = 256, [0x12] = 256,
     [0x13] = 4, [0x14] = 8, [0x15] = 512, [0x16] = 256, [0x17] = 2, [0x18] = 256, [0x19] = 4096, [0x1A] = 131072,
@@ -183,6 +183,10 @@ static const int devinfo[] = {   // Tegra X1 values (nnheaders nvn_DeviceConstan
     [0x55] = 262144, [0x56] = 4096, [0x57] = 1, [0x58] = 4, [0x59] = 2, [0x5A] = 0, [0x5B] = 4096, [0x5C] = 16384,
     [0x5D] = 4096, [0x5E] = 128, [0x5F] = 4096,   // 0x5F (separate sampler bindings) from the sampler pool limit, unverified
 };
+
+// LOCAL TEST (Ocarina): the NVN 2 items past the table above, from seedds/nxnative hle_nvn.c g_devinfo2 (MIT, Copyright
+// (c) 2026 seedds). Items NVN 2 reads from the GPU at run time answer 0, as there.
+static const int devinfo2[] = {[0x60] = 65535, [0x61] = 1, [0x62] = 0, [0x63] = 256, [0x64] = 16, [0x65] = 65535, [0x66] = 65535, [0x67] = 256, [0x68] = 1, [0x69] = 16, [0x6a] = 16, [0x6b] = 16, [0x6c] = 1, [0x6d] = 1, [0x6e] = 1, [0x6f] = 256, [0x70] = 0, [0x71] = 16, [0x72] = 8, [0x73] = 16, [0x74] = 32, [0x75] = 31, [0x76] = 536870912, [0x77] = 16777216, [0x78] = 16777216, [0x79] = 1073741824, [0x7a] = 32, [0x7b] = 1, [0x7c] = 64, [0x7d] = 0, [0x7e] = 1, [0x7f] = 2147483647, [0x80] = 32, [0x81] = 32, [0x82] = 4194303, [0x83] = 512, [0x84] = 256, [0x85] = 32, [0x86] = 16383, [0x87] = 0, [0x88] = 8, [0x89] = 0, [0x8a] = 0, [0x8b] = 4, [0x8c] = 256, [0x8d] = 16, [0x8e] = 0, [0x8f] = 1, [0x90] = 31, [0x91] = 0, [0x92] = 64, [0x93] = 1, [0x94] = 58368, [0x95] = 24576, [0x96] = 0, [0x97] = 256, [0x98] = 262144, [0x99] = 0, [0x9a] = 0, [0x9b] = 0, [0x9c] = 201, [0x9d] = 14, [0x9e] = 201, [0x9f] = 20, [0xa0] = 163840, [0xa1] = 8, [0xa2] = 4, [0xa3] = 256, [0xa4] = 256, [0xa5] = 4, [0xa6] = 65536, [0xa7] = 201, [0xa8] = 5, [0xa9] = 1};
 
 // void nvnDeviceBuilderSetDefaults(NVNdeviceBuilder *b)
 NVN_API(nvnDeviceBuilderSetDefaults) { memset(arg_p(c, 0), 0, sizeof(dev_builder_t)); }
@@ -204,7 +208,12 @@ NVN_API(nvnDeviceFinalize) { ((dev_t_ *)arg_p(c, 0))->magic = 0; }
 NVN_API(nvnDeviceGetInteger) {
     unsigned w = (unsigned)arg_x(c, 1);
     int *out = arg_p(c, 2);
-    if (w >= sizeof devinfo / sizeof *devinfo) rt_fatal("nvn: unsupported NVN device property %#x", w);
+    if (w >= sizeof devinfo / sizeof *devinfo) {   // LOCAL TEST (Ocarina): newer properties answer 0
+        static uint8_t seen[1024];
+        if (w < 1024 && !seen[w]) { seen[w] = 1; rt_log("nvn: LOCAL TEST: device property %#x answers %d", w, w < sizeof devinfo2 / sizeof *devinfo2 ? devinfo2[w] : 0); }
+        *out = w < sizeof devinfo2 / sizeof *devinfo2 ? devinfo2[w] : 0;
+        return;
+    }
     *out = devinfo[w];
     NVN_LOG("DeviceGetInteger %#x -> %d", w, *out);
 }
@@ -489,6 +498,22 @@ NVN_API(nvnSyncWait) {
     if (ok) b->cpu_synced(s->fence);
     ret_x(c, ok ? NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED : NVN_SYNC_WAIT_RESULT_TIMEOUT_EXPIRED);
 }
+// LOCAL TEST (Ocarina): void nvnQueueWaitSync(NVNqueue *q, const NVNsync *s): later work on q runs after the fence. Submits
+// replay in order on the host, so waiting here gives that order, at the cost of the guest thread. ponytail: a bound, so a
+// fence that only a later submit on this thread would signal cannot hang the game.
+NVN_API(nvnQueueWaitSync) {
+    const sync_t *s = arg_p(c, 1);
+    static volatile int64_t timeouts;
+    if (!s || !s->fenced) return;
+    const GfxBackend *b = gfx_backend();
+    if (b->fence_done() >= s->fence) return;
+    int ok;
+    {
+        NVN_BLOCKING();
+        ok = b->fence_wait(s->fence, 200000000);
+    }
+    if (!ok && __atomic_add_fetch(&timeouts, 1, __ATOMIC_RELAXED) == 1) rt_log("nvn: LOCAL TEST: nvnQueueWaitSync timed out");
+}
 // void nvnEventBuilderSetDefaults(NVNeventBuilder *b)
 NVN_API(nvnEventBuilderSetDefaults) { memset(arg_p(c, 0), 0, sizeof(ev_builder_t)); }
 // void nvnEventBuilderSetStorage(NVNeventBuilder *b, const NVNmemoryPool *p, int64_t offset)
@@ -618,6 +643,11 @@ NVN_API(nvnQueueSubmitCommands) {
     while (f > prev && !__atomic_compare_exchange_n(&last_fence, &prev, f, 1, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {}
     __atomic_store_n(&lod_fence[no % LOD_RING], f, __ATOMIC_RELAXED);
     __atomic_store_n(&lod_issued, no, __ATOMIC_SEQ_CST);
+    {   // LOCAL TEST (Ocarina): OOT_SUBMIT_SYNC=1: the caller waits for replay and GPU, as if the game wrote nothing behind them
+        static int on = -1;
+        if (on < 0) { const char *e = getenv("OOT_SUBMIT_SYNC"); on = !(e && *e == '0'); }   // on by default: the game rewrites data the replay has not reached yet (random NaN frames otherwise)
+        if (on) gfx_backend()->fence_wait(f, 400000000);
+    }
 }
 
 // The producer (1.2.1 main f_70008c6460) releases the read lock on obj+0x538 at lr 0x70008c70c8; when

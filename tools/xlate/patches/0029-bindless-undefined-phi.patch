@@ -1,0 +1,11 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/BindlessElimination.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/BindlessElimination.cs
+@@ -104,7 +104,7 @@
+                     Operand phiSource = phi.GetSource(srcIndex);
+ 
+                     // A constant source is the path where the compiler skips the sample: its handle is never used.
+-                    if (phiSource.Type != OperandType.Constant && phiSource.AsgOp is not PhiNode && !IsBindlessAccessAllowed(phiSource))
++                    if (phiSource.Type != OperandType.Constant && phiSource.AsgOp != null && phiSource.AsgOp is not PhiNode && !IsBindlessAccessAllowed(phiSource))
+                     {
+                         return false;
+                     }

@@ -28,6 +28,15 @@
 #include "vk.h"
 #include "vk_exec.h"
 
+// LOCAL TEST (Ocarina): GPU transfers that touch the mesh argument buffers
+static void oot_trace(const char *what, uint64_t dst, uint64_t size, uint64_t v) {
+    uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
+    if (f < 1797 || f > 1800) return;
+    if ((dst < 0x2a01e4000ull + 0x100 && dst + size > 0x2a01e4000ull) || (dst < 0x2a027f040ull + 0x100 && dst + size > 0x2a027f040ull))
+        rt_log("vk: %s to %#llx + %#llx (%#llx) frame %llu", what, (unsigned long long)dst, (unsigned long long)size, (unsigned long long)v, (unsigned long long)f);
+}
+
+
 #define WEAK __attribute__((weak))
 #define CALL_DEPTH 8
 
@@ -616,12 +625,67 @@ void vk_exec_pass_begin(VkExec *ex) {
     ex->in_pass = 1;
 }
 
+// LOCAL TEST (Ocarina): OOT_GPU_PROF=<present>: timestamps after every pass and dispatch and at the start of every command buffer
+// for six presents, then the cost per kind and the costliest. Run with TOTK_VK_RECORDER=0: vkCmdWriteTimestamp has no wrapper.
+void vk_prof_mark(VkExec *ex, const char *kind, uint64_t id) {
+    enum { PN = 16384 };
+    static long at = -2;
+    static VkQueryPool pool;
+    static struct { const char *kind; uint64_t id; } m[PN];
+    static int n, done;
+    if (at == -2) { const char *e = getenv("OOT_GPU_PROF"); at = e ? atol(e) : -1; }
+    if (at < 0 || done || !ex->cb) return;
+    long f = (long)__atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
+    if (f < at) return;
+    VkCtx *c = vk_ctx();
+    if (!pool) {
+        VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = PN};
+        if (vkCreateQueryPool(c->device, &qi, NULL, &pool) != VK_SUCCESS) { done = 1; return; }
+        vkResetQueryPool(c->device, pool, 0, PN);
+    }
+    if (f < at + 6) {
+        if (n < PN) {
+            vkCmdWriteTimestamp(ex->cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool, (uint32_t)n);
+            m[n].kind = kind, m[n].id = id, n++;
+        }
+        return;
+    }
+    if (f < at + 14 || n < 2) return;
+    done = 1;
+    static uint64_t t[PN];
+    if (vkGetQueryPoolResults(c->device, pool, 0, (uint32_t)n, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT) < 0) { rt_log("gpu prof: no results"); return; }
+    double per = c->props.limits.timestampPeriod / 1e6, total = (double)(t[n - 1] - t[0]) * per;
+    struct { const char *k; uint64_t id; double ms; int calls; } a[512];
+    int na = 0;
+    double bykind[4] = {0};
+    const char *names[4] = {"pass", "dispatch", "gap before a command buffer", "other"};
+    for (int i = 1; i < n; i++) {
+        double d = t[i] >= t[i - 1] ? (double)(t[i] - t[i - 1]) * per : 0;
+        int k = !strcmp(m[i].kind, "pass") ? 0 : !strcmp(m[i].kind, "dispatch") ? 1 : !strcmp(m[i].kind, "part") ? 2 : 3;
+        bykind[k] += d;
+        int j = 0;
+        while (j < na && (a[j].k != m[i].kind || a[j].id != m[i].id)) j++;
+        if (j == na && na < 512) a[na++].k = m[i].kind, a[j].id = m[i].id, a[j].ms = 0, a[j].calls = 0;
+        if (j < 512) a[j].ms += d, a[j].calls++;
+    }
+    rt_log("gpu prof: %d marks over 6 presents, span %.1f ms (%.1f per present)", n, total, total / 6);
+    for (int k = 0; k < 4; k++) rt_log("gpu prof: %s %.1f ms per present", names[k], bykind[k] / 6);
+    for (int r = 0; r < 30; r++) {
+        int best = -1;
+        for (int j = 0; j < na; j++) if (a[j].calls && (best < 0 || a[j].ms > a[best].ms)) best = j;
+        if (best < 0) break;
+        rt_log("gpu prof: %6.2f ms per present, %3d calls: %s %#llx", a[best].ms / 6, a[best].calls, a[best].k, (unsigned long long)a[best].id);
+        a[best].calls = 0;
+    }
+}
+
 void vk_exec_pass_end(VkExec *ex) {
     if (!ex->in_pass) return;
     vk_exec_oq_pass_end(ex);
     vkCmdEndRendering(ex->cb);
     ex->recorded++;
     ex->in_pass = 0;
+    vk_prof_mark(ex, "pass", (uint64_t)ex->pass_w << 16 | ex->pass_h);
     for (int i = 0; i < ex->pass_ncolor && i < 8; i++)   // stand-ins of 3D BC targets go to their textures
         if (ex->color[i].image && ex->color[i].img && ex->color[i].img->image != ex->color[i].image)
             bc_copy_back(ex, &ex->color[i]);
@@ -818,6 +882,7 @@ static void maybe_split(VkExec *ex) {
     split_draws = 0;
     if (ex->recorded == part_start) return;
     ex->cb = vk_sync_split();
+    vk_prof_mark(ex, "part", 0);
     part_start = ex->recorded;
     part_t0 = kern_now_ns();
     ex->dirty = VK_EXEC_DIRTY_ALL;
@@ -935,6 +1000,7 @@ static void walk(VkExec *ex, const op_hdr *h, int depth) {
         case OP_SET_SAMP_POOL: ex->samp_pool = ((const p_set_pool *)a)->pool, ex->tex_serial++; break;
         case OP_BARRIER: vk_exec_barrier(ex); break;
         case OP_WAIT_SYNC: break;   // submit preparation waited before any replay/snapshot; source may be gone
+        case OP_DRAW_MESH: case OP_DRAW_MESH_IND: vk_exec_op_draw(ex, h->op, a); break;
         case OP_DRAW: case OP_DRAW_IDX: case OP_DISPATCH: case OP_UPDATE_UB: case OP_DRAW_IDX_IND: case OP_DISPATCH_IND:
             if (h->op == OP_DRAW || h->op == OP_DRAW_IDX || h->op == OP_DRAW_IDX_IND) vk_exec_frame.draws_seen++, split_draws++;
             if (h->op == OP_DISPATCH || h->op == OP_DISPATCH_IND) vk_exec_frame.dispatches++, split_draws++;
@@ -943,11 +1009,13 @@ static void walk(VkExec *ex, const op_hdr *h, int depth) {
             vk_exec_op_draw(ex, h->op, a);
             break;
         case OP_COPY_B2B: case OP_COPY_B2T: case OP_COPY_T2B: case OP_COPY_T2T: case OP_CLEAR_TEX:
+            if (h->op == OP_COPY_B2B) oot_trace("copy", ((const p_copy_b2b *)a)->dst, ((const p_copy_b2b *)a)->size, ((const p_copy_b2b *)a)->src);
             if (h->op != OP_CLEAR_TEX) vk_exec_frame.copies++;
             if (vk_dump_armed) vk_dump_copy(ex, h->op, a);
             // fall through
         case OP_SIGNAL_EVENT: case OP_REPORT_COUNTER: case OP_RESET_COUNTER: case OP_RENDER_ENABLE: case OP_RENDER_COND:
         case OP_CLEAR_BUF:
+            if (h->op == OP_CLEAR_BUF) oot_trace("clear", ((const p_clear_buf *)a)->addr, ((const p_clear_buf *)a)->size, ((const p_clear_buf *)a)->value);
             vk_exec_op_xfer(ex, h->op, a);
             break;
         default: rt_fatal("vk: op %s has no replay handler", nvn_op_name(h->op));
@@ -962,6 +1030,7 @@ static int record_impl(VkCommandBuffer cb, const uint64_t *handles, int n, uint6
     VkExec *ex = &X;
     if (!x_ready) state_reset(ex), vk_dump_init(), x_ready = 1;
     ex->cb = cb;
+    vk_prof_mark(ex, "part", 1);
     ex->fence = fence;
     ex->submitted_ticks = submitted_ticks;
     ex->recorded = 0;

@@ -1,0 +1,36 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/BindlessElimination.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/BindlessElimination.cs
+@@ -42,7 +42,7 @@
+                         ? texOp.Type.GetGlslImageTypeName(texOp.Format.GetComponentType())
+                         : texOp.Type.GlslTextureTypeName;
+ 
+-                    gpuAccessor.Log($"Failed to find handle source for bindless access of type \"{typeName}\".");
++                    gpuAccessor.Log($"Failed to find handle source for bindless access of type \"{typeName}\" inst {texOp.Inst} flags {texOp.Flags} handle {DescribeHandle(texOp.GetSource(0), 7)}");
+ 
+                     for (int destIndex = 0; destIndex < texOp.DestsCount; destIndex++)
+                     {
+@@ -52,6 +52,24 @@
+                     Utils.DeleteNode(node, texOp);
+                 }
+             }
++        }
++
++        // LOCAL TEST (Ocarina): the expression behind a handle nothing resolved.
++        private static string DescribeHandle(Operand o, int depth)
++        {
++            if (o.Type == OperandType.Constant) return "#" + o.Value.ToString("x");
++            if (o.Type == OperandType.ConstantBuffer) return "cb" + o.GetCbufSlot() + "[" + o.GetCbufOffset() + "]";
++            if (o.AsgOp is PhiNode phi)
++            {
++                string p = "phi(";
++                for (int i = 0; i < phi.SourcesCount && depth > 0; i++) p += (i != 0 ? "," : "") + DescribeHandle(phi.GetSource(i), depth - 1);
++                return p + ")";
++            }
++            if (o.AsgOp is not Operation op) return o.Type.ToString();
++            if (depth == 0) return op.Inst.ToString() + "..";
++            string args = "";
++            for (int i = 0; i < op.SourcesCount; i++) args += (i != 0 ? "," : "") + DescribeHandle(op.GetSource(i), depth - 1);
++            return op.Inst + (op.StorageKind != StorageKind.None ? ":" + op.StorageKind : "") + "(" + args + ")";
+         }
+ 
+         private static bool GenerateBindlessAccess(

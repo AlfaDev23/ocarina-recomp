@@ -24,6 +24,7 @@ extern "C" {
 // ---- state, any thread
 int menu_is_open(void);
 void menu_toggle(void);                   // F1 / Esc on the keyboard, Minus+Plus on the pad
+void menu_miojo(void);                    // the cook's signature, on the title line of the menu, and opens it
 void menu_perf_cycle(void);               // F10: the performance overlay off, fps, full
 
 // ---- events from the window adapter, used only while the menu is open. key: an ImGuiKey; coordinates in pixels of the

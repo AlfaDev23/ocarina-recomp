@@ -61,7 +61,7 @@ enum { SPV_OP_ENTRY_POINT = 15, SPV_OP_TYPE_INT = 21, SPV_OP_TYPE_FLOAT = 22, SP
        SPV_OP_DECORATE = 71, SPV_DEC_BUILTIN = 11, SPV_DEC_LOCATION = 30, SPV_DEC_INDEX = 32, SPV_DEC_BINDING = 33, SPV_DEC_DESCRIPTOR_SET = 34,
        SPV_SC_OUTPUT = 3 };
 
-#define MAX_BINDINGS 128
+#define MAX_BINDINGS 256   // LOCAL TEST (Ocarina): was 128; guarded vertex and fragment stages together passed it and the draws were lost
 #define PIPE_BUCKETS 4096
 #define LAYOUT_BUCKETS 256
 
@@ -665,10 +665,20 @@ static uint32_t *spirv_rebind(const uint32_t *w, uint64_t n, uint32_t off) {
     uint32_t *o = malloc(n * 4);
     if (!o) return NULL;
     memcpy(o, w, n * 4);
+    uint32_t fixed[16];   // LOCAL TEST (Ocarina): the variables of the shared set 2 keep their bindings
+    int nfixed = 0;
     for (uint64_t i = 5; i < n;) {
         uint32_t op = o[i] & 0xffff, len = o[i] >> 16;
         if (!len || i + len > n) break;
-        if (op == SPV_OP_DECORATE && len >= 4 && o[i + 2] == SPV_DEC_BINDING && o[i + 3] >= 1) o[i + 3] += off;
+        if (op == SPV_OP_DECORATE && len >= 4 && o[i + 2] == SPV_DEC_DESCRIPTOR_SET && o[i + 3] == 2 && nfixed < 16) fixed[nfixed++] = o[i + 1];
+        i += len;
+    }
+    for (uint64_t i = 5; i < n;) {
+        uint32_t op = o[i] & 0xffff, len = o[i] >> 16;
+        if (!len || i + len > n) break;
+        int keep = 0;
+        for (int k = 0; k < nfixed; k++) keep |= fixed[k] == o[i + 1];
+        if (op == SPV_OP_DECORATE && len >= 4 && o[i + 2] == SPV_DEC_BINDING && o[i + 3] >= 1 && !keep) o[i + 3] += off;
         i += len;
     }
     return o;
@@ -682,7 +692,7 @@ static uint32_t *spirv_set(const uint32_t *w, uint64_t n, uint32_t set) {
     for (uint64_t i = 5; i < n;) {
         uint32_t op = o[i] & 0xffff, len = o[i] >> 16;
         if (!len || i + len > n) break;
-        if (op == SPV_OP_DECORATE && len >= 4 && o[i + 2] == SPV_DEC_DESCRIPTOR_SET) o[i + 3] = set;
+        if (op == SPV_OP_DECORATE && len >= 4 && o[i + 2] == SPV_DEC_DESCRIPTOR_SET && o[i + 3] != 2) o[i + 3] = set;
         i += len;
     }
     return o;
@@ -1062,14 +1072,88 @@ static void pin_subgroup32(VkPipelineShaderStageCreateInfo *st, VkPipelineShader
     st->pNext = rq;
 }
 
+static int spirv_is_mesh(const uint32_t *w, uint64_t n);
+static uint64_t spv_fnv(const uint32_t *w, uint64_t words) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    const uint8_t *b = (const uint8_t *)w;
+    for (uint64_t i = 0; i < words * 4; i++) h = (h ^ b[i]) * 0x100000001b3ull;
+    return h;
+}
+
+// LOCAL TEST (Ocarina): TOTK_SPV_OVERRIDE=<dir>: a shader whose hash has <dir>/sh_<hash>.spv uses that SPIR-V instead.
+static uint32_t *spv_override(const uint32_t *w, uint64_t words, uint64_t *out_words) {
+    static const char *dir;
+    static int init;
+    if (!init) dir = getenv("TOTK_SPV_OVERRIDE"), init = 1;
+    if (!dir || !*dir) return NULL;
+    char path[600];
+    snprintf(path, sizeof path, "%s/sh_%016llx.spv", dir, (unsigned long long)spv_fnv(w, words));
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint32_t *o = malloc((size_t)n);
+    if (!o || fread(o, 1, (size_t)n, f) != (size_t)n) rt_fatal("spv override: cannot read %s", path);
+    fclose(f);
+    *out_words = (uint64_t)n / 4;
+    rt_log("vk_pipeline: LOCAL TEST: shader override %s", path);
+    return o;
+}
+
+// LOCAL TEST (Ocarina): FMin, FMax and FClamp become NMin, NMax and NClamp, whose NaN operand gives the other one, as on the
+// console: a material's min(0 * (1 / 0), 1) came out NaN on NVIDIA and left the world black. A copy of the module, or NULL
+// when nothing changes. ponytail: not compute shaders, so their big upscaler stays in the driver's cache; add them if a
+// compute pass shows NaN.
+static uint32_t *spirv_nan_minmax(const uint32_t *w, uint64_t n) {
+    uint32_t glsl = 0;
+    uint32_t *o = NULL;
+    for (uint64_t i = 5; i < n && w[i] >> 16;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (i + len > n) break;
+        if (op == 15 && w[i + 1] == 5) {   // OpEntryPoint GLCompute
+            free(o);
+            return NULL;
+        }
+        if (op == 11 && len >= 3 && !memcmp(&w[i + 2], "GLSL.std.450", 12)) glsl = w[i + 1];
+        if (op == 12 && len >= 5 && glsl && w[i + 3] == glsl) {
+            uint32_t to = w[i + 4] == 37 ? 79 : w[i + 4] == 40 ? 80 : w[i + 4] == 43 ? 81 : 0;
+            if (to) {
+                if (!o) {
+                    if (!(o = malloc((size_t)n * 4))) rt_fatal("vk_pipeline: out of memory");
+                    memcpy(o, w, (size_t)n * 4);
+                }
+                o[i + 4] = to;
+            }
+        }
+        i += len;
+    }
+    return o;
+}
+
+static const uint32_t *fs_spirv_over(const GfxShader *fs, uint64_t *words) {   // the override is kept: a few shaders
+    const uint32_t *w = gfx_shader_spirv(fs, words);
+    uint64_t n = 0;
+    uint32_t *o = w ? spv_override(w, *words, &n) : NULL;
+    if (o) *words = n;
+    return o ? o : w;
+}
+
 static VkShaderModule make_module_linked(const uint32_t *w, uint64_t words, int geometry_chain) {
+    uint64_t over_n = 0;
+    uint32_t *over = spv_override(w, words, &over_n);
+    if (over) w = over, words = over_n;
+    uint32_t *minmax = spirv_nan_minmax(w, words);
+    if (minmax) w = minmax;
     uint64_t fixed_n = 0;
-    uint32_t *fixed = geometry_chain ? spirv_fixup_linked(w, words, &fixed_n, 1) : spirv_fixup(w, words, &fixed_n);
+    uint32_t *fixed = spirv_is_mesh(w, words) ? NULL : geometry_chain ? spirv_fixup_linked(w, words, &fixed_n, 1) : spirv_fixup(w, words, &fixed_n);
     if (fixed) w = fixed, words = fixed_n;
     VkShaderModuleCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = (size_t)words * 4, .pCode = w};
     VkShaderModule m = VK_NULL_HANDLE;
     VkResult r = vkCreateShaderModule(P.device, &ci, NULL, &m);
     free(fixed);
+    free(minmax);
+    free(over);
     return r == VK_SUCCESS ? m : VK_NULL_HANDLE;
 }
 
@@ -1515,6 +1599,14 @@ static VkDescriptorType descriptor_type(int kind, const GfxShaderRes *r) {
     }
 }
 
+static int mesh_vs(const VkPipeState *s) { return s->vs && gfx_shader_is_mesh(s->vs); }   // LOCAL TEST (Ocarina)
+// The first entry point of a module is MeshEXT: it takes no vertex stage fixups.
+static int spirv_is_mesh(const uint32_t *w, uint64_t n) {
+    for (uint64_t i = 5; i < n && w[i] >> 16; i += w[i] >> 16)
+        if ((w[i] & 0xffff) == 15) return i + 1 < n && w[i + 1] == 5365;
+    return 0;
+}
+
 static VkShaderStageFlags stage_bit(int stage) {
     switch (stage) {
     case GFX_STAGE_VS: return VK_SHADER_STAGE_VERTEX_BIT;
@@ -1540,8 +1632,9 @@ static uint32_t binding_span(const GfxShader *s) {
 // Adds a stage's resources with bindings b >= 1 moved by off; binding 0 (support buffer) is shared.
 static int add_stage(Bindings *B, const GfxShader *s, uint32_t off) {
     int stage = gfx_shader_stage(s);
-    VkShaderStageFlags bit = stage_bit(stage);
+    VkShaderStageFlags bit = gfx_shader_is_task(s) ? VK_SHADER_STAGE_TASK_BIT_EXT : gfx_shader_is_mesh(s) ? VK_SHADER_STAGE_MESH_BIT_EXT : stage_bit(stage);
     if (!bit) return 0;
+    if (gfx_shader_is_task(s)) stage = GFX_STAGE_TCS;   // LOCAL TEST (Ocarina): the vertex slot's tables (vk_exec_draw.c nvn_stage_of)
     if (!B->n) {
         B->b[0] = (VkDescriptorSetLayoutBinding){0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, 0, NULL};
         B->pb[0] = (VkPipeBinding){0, (uint8_t)stage, VK_PIPE_SUPPORT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, 0, NULL};
@@ -1570,10 +1663,20 @@ static int add_stage(Bindings *B, const GfxShader *s, uint32_t off) {
 static int module_binding_missing(const GfxShader *s, const VkDescriptorSetLayoutBinding *b, uint32_t n, uint32_t off) {
     uint64_t words = 0;
     const uint32_t *w = gfx_shader_spirv(s, &words);
+    uint32_t shared[16];   // LOCAL TEST (Ocarina): variables of set 2 are not in this layout's lists
+    int nshared = 0;
     for (uint64_t i = 5; w && i < words;) {
         uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
         if (!len || i + len > words) break;
-        if (op == SPV_OP_DECORATE && len >= 4 && w[i + 2] == SPV_DEC_BINDING) {
+        if (op == SPV_OP_DECORATE && len >= 4 && w[i + 2] == SPV_DEC_DESCRIPTOR_SET && w[i + 3] == 2 && nshared < 16) shared[nshared++] = w[i + 1];
+        i += len;
+    }
+    for (uint64_t i = 5; w && i < words;) {
+        uint32_t op = w[i] & 0xffff, len = w[i] >> 16;
+        if (!len || i + len > words) break;
+        int keep = 0;
+        for (int k = 0; k < nshared; k++) keep |= shared[k] == w[i + 1];
+        if (op == SPV_OP_DECORATE && len >= 4 && w[i + 2] == SPV_DEC_BINDING && !keep) {
             uint32_t want = w[i + 3] + (w[i + 3] >= 1 ? off : 0), j = 0;
             while (j < n && b[j].binding != want) j++;
             if (j == n) return (int)w[i + 3];
@@ -1588,6 +1691,10 @@ static int layout_covers(const VkPipeState *s, const Layout *l, uint32_t fs_off,
     uint32_t nv = l->set1 ? l->n0 : l->n;
     int m = module_binding_missing(s->vs, l->b, nv, 0);
     const char *stage = "vertex";
+    if (m < 0 && s->ts) {
+        m = module_binding_missing(s->ts, l->b, l->n, binding_span(s->vs) - 1);
+        stage = "task";
+    }
     if (m < 0 && s->gs) {
         if (l->set1) { snprintf(why, cap, "geometry requires a monolithic layout"); return 0; }
         m = module_binding_missing(s->gs, l->b, l->n, binding_span(s->vs) - 1);
@@ -1669,8 +1776,9 @@ static Layout *layout_get(Bindings *B) {
         free(l);
         return NULL;
     }
-    VkPipelineLayoutCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
-                                     .pSetLayouts = &l->set};
+    VkDescriptorSetLayout sets3[3] = {l->set, vk_bindless_empty(), vk_bindless_layout()};
+    VkPipelineLayoutCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = sets3[2] ? 3 : 1,
+                                     .pSetLayouts = sets3};
     if (vkCreatePipelineLayout(P.device, &pi, NULL, &l->layout) != VK_SUCCESS) {
         vkDestroyDescriptorSetLayout(P.device, l->set, NULL);
         free(l);
@@ -1724,9 +1832,9 @@ static Layout *layout_pair(Bindings *B, Bindings *F) {
         free(l);
         return NULL;
     }
-    VkDescriptorSetLayout sets[2] = {l->set, l->set1};
+    VkDescriptorSetLayout sets[3] = {l->set, l->set1, vk_bindless_layout()};
     VkPipelineLayoutCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                     .flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT, .setLayoutCount = 2,
+                                     .flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT, .setLayoutCount = sets[2] ? 3 : 2,
                                      .pSetLayouts = sets};
     if (vkCreatePipelineLayout(P.device, &pi, NULL, &l->layout) != VK_SUCCESS) {
         vkDestroyDescriptorSetLayout(P.device, l->set, NULL);
@@ -1819,7 +1927,7 @@ static Pipe *pipe_add(const void *key, size_t size, uint64_t h, VkPipeline pipel
 // ---- graphics pipelines
 
 typedef struct {                       // normalized: zero where the state is dynamic or unused
-    const GfxShader *vs, *fs, *gs;
+    const GfxShader *vs, *fs, *gs, *ts;
     uint32_t color[8], depth, stencil; // VkFormat
     uint8_t n_color, samples, topo_class, minus_w;
     uint8_t clamp, poly_mode, a2c, logic_op;   // logic_op: VkLogicOp + 1 when enabled
@@ -1879,8 +1987,8 @@ uint32_t vk_pipeline_target_wmask(const VkPipeState *s, int i) { return target_w
 
 static void gkey_fill(const VkPipeState *s, GKey *k) {
     memset(k, 0, sizeof *k);
-    k->vs = s->vs, k->fs = s->fs, k->gs = s->gs;
-    k->indep = s->gs ? 0 : (uint8_t)P.indep;
+    k->vs = s->vs, k->fs = s->fs, k->gs = s->gs, k->ts = s->ts;
+    k->indep = s->gs || mesh_vs(s) ? 0 : (uint8_t)P.indep;
     k->geometry_input = s->gs ? vk_geometry_input(s->prim) : 0;
     k->n_color = (uint8_t)target_count(s);
     for (int i = 0; i < k->n_color; i++) k->color[i] = target_format(s->color_fmt[i], NULL, NULL);
@@ -1979,7 +2087,7 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
                 else vcode = vpatched, vw = n2;
             }
         }
-        const uint32_t *fcode = gfx_shader_spirv(s->fs, &fw);
+        const uint32_t *fcode = fs_spirv_over(s->fs, &fw);
         if (k->alpha && fcode) {   // before spirv_dual_source, which adds a second output at Location 0
             uint64_t n2 = 0;
             uint32_t *a = spirv_alpha_test(fcode, fw, k->alpha, k->alpha_ref, &n2);
@@ -2012,18 +2120,28 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
     // Plain VS/FS modules retain their original fixup path and uploaded bytes.
     vm = make_module_linked(vcode, vw, s->gs != NULL);
     free(vpatched), free(fpatched);
+    VkShaderModule tm = VK_NULL_HANDLE;   // LOCAL TEST (Ocarina): the task stage, bindings after the mesh stage's
+    if (s->ts) {
+        uint64_t tw = 0;
+        const uint32_t *tcode = gfx_shader_spirv(s->ts, &tw);
+        uint32_t off = binding_span(s->vs) - 1;
+        uint32_t *patched = off && tcode ? spirv_rebind(tcode, tw, off) : NULL;
+        if (tcode && (!off || patched)) tm = make_module(patched ? patched : tcode, tw);
+        free(patched);
+    }
     VkPipeline pipe = VK_NULL_HANDLE;
-    if (!vm || (s->fs && !fm) || (s->gs && !gm)) goto out;
+    if (!vm || (s->fs && !fm) || (s->gs && !gm) || (s->ts && !tm)) goto out;
 
-    VkPipelineShaderStageCreateInfo stages[3];
-    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rq[3];
-    const GfxShader *shaders[3] = {s->vs, s->gs, s->fs};
-    VkShaderModule modules[3] = {vm, gm, fm};
+    VkPipelineShaderStageCreateInfo stages[4];
+    VkPipelineShaderStageRequiredSubgroupSizeCreateInfo rq[4];
+    const GfxShader *shaders[4] = {s->vs, s->gs, s->fs, s->ts};
+    VkShaderModule modules[4] = {vm, gm, fm, tm};
     uint32_t stage_count = 0;
-    for (int i = 0; i < 3; i++) if (shaders[i]) {
+    for (int i = 0; i < 4; i++) if (shaders[i]) {
         VkPipelineShaderStageCreateInfo *st = &stages[stage_count];
         *st = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = stage_bit(gfx_shader_stage(shaders[i])), .module = modules[i], .pName = "main"};
+            .stage = gfx_shader_is_task(shaders[i]) ? VK_SHADER_STAGE_TASK_BIT_EXT : gfx_shader_is_mesh(shaders[i]) ? VK_SHADER_STAGE_MESH_BIT_EXT : stage_bit(gfx_shader_stage(shaders[i])),
+            .module = modules[i], .pName = "main"};
         uint64_t sw = 0;
         const uint32_t *scode = gfx_shader_spirv(shaders[i], &sw);
         pin_subgroup32(st, &rq[stage_count], scode, sw);
@@ -2093,6 +2211,16 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
                                        .pDynamicState = &dy, .layout = l->layout};
     if (k->fbl & 1) pi.flags |= VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
     if (k->fbl & 2) pi.flags |= VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+    VkDynamicState mesh_dyn[sizeof P.dyn / sizeof *P.dyn];
+    if (mesh_vs(s)) {   // no vertex input or input assembly state in a mesh pipeline, static or dynamic
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < P.n_dyn; i++)
+            if (P.dyn[i] != VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY && P.dyn[i] != VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE &&
+                P.dyn[i] != VK_DYNAMIC_STATE_VERTEX_INPUT_EXT && P.dyn[i] != VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE)
+                mesh_dyn[n++] = P.dyn[i];
+        dy.dynamicStateCount = n, dy.pDynamicStates = mesh_dyn;
+        pi.pVertexInputState = NULL, pi.pInputAssemblyState = NULL;
+    }
     uint64_t p0 = perf_begin();
     VkResult r = vkCreateGraphicsPipelines(P.device, P.cache, 1, &pi, NULL, &pipe);
     perf_end(PERF_PIPE, p0);   // counts on the render thread only, so background builds stay out of it
@@ -2140,9 +2268,9 @@ static double ms_since(uint64_t t0) { return (double)(qpc() - t0) / 1e6; }
 
 static VkPipelineLayout half_layout(Layout *l, int h) {
     if (l->half[h]) return l->half[h];
-    VkDescriptorSetLayout sets[2] = {h ? VK_NULL_HANDLE : l->set, h ? l->set1 : VK_NULL_HANDLE};
+    VkDescriptorSetLayout sets[3] = {h ? VK_NULL_HANDLE : l->set, h ? l->set1 : VK_NULL_HANDLE, vk_bindless_layout()};
     VkPipelineLayoutCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                     .flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT, .setLayoutCount = 2,
+                                     .flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT, .setLayoutCount = sets[2] ? 3 : 2,
                                      .pSetLayouts = sets};
     if (vkCreatePipelineLayout(P.device, &pi, NULL, &l->half[h]) != VK_SUCCESS) l->half[h] = VK_NULL_HANDLE;
     return l->half[h];
@@ -2214,7 +2342,7 @@ static VkPipeline lib_create(int kind, const VkPipeState *s, const GKey *k, VkPi
     } else if (kind == LIB_FS) {
         if (s->fs) {
             uint64_t fw, sw, n2 = 0;
-            const uint32_t *fcode = gfx_shader_spirv(s->fs, &fw), *scode = fcode;
+            const uint32_t *fcode = fs_spirv_over(s->fs, &fw), *scode = fcode;
             sw = fw;
             uint32_t *d = NULL, *at = NULL;
             if (k->alpha && fcode) {   // before spirv_dual_source, which adds a second output at Location 0
@@ -2418,7 +2546,7 @@ static void lib_keys(const VkPipeState *s, const GKey *k, ViKey *v, PrKey *pk, F
 static VkPipeline gpl_link(const VkPipeState *s, const GKey *k, const Layout *lc, int build, int *final) {
     Layout *l = (Layout *)lc;
     *final = 1;
-    if (s->gs || !l->set1 || k->fbl) return VK_NULL_HANDLE;
+    if (s->gs || mesh_vs(s) || !l->set1 || k->fbl) return VK_NULL_HANDLE;
     uint64_t t0 = qpc();
     ViKey vk_;
     PrKey pk;
@@ -2575,7 +2703,7 @@ static void rec_fill(KeyRec *r, const VkPipeState *s) {
 
 // A pipeline was built for a draw: queue its record for the file. Caller holds P.lock.
 static void keys_note(const VkPipeState *s) {
-    if (s->gs || !A.on || !K.path[0]) return;             // GS prewarm records need a future explicit format
+    if (s->gs || mesh_vs(s) || !A.on || !K.path[0]) return;             // GS prewarm records need a future explicit format
     KeyRec r;
     rec_fill(&r, s);
     if (!seen_add(rec_hash(&r))) return;
@@ -2818,6 +2946,7 @@ static Pipe *pipe_miss(const VkPipeState *s, const GKey *k, uint64_t h, int mode
     Layout *l = NULL;
     uint32_t span = binding_span(s->vs), fs_off = span - 1;
     if (s->gs) fs_off += binding_span(s->gs) - 1;
+    if (s->ts) fs_off += binding_span(s->ts) - 1;
     if (gfx_shader_stage(s->vs) != GFX_STAGE_VS || (s->fs && gfx_shader_stage(s->fs) != GFX_STAGE_FS) ||
         (s->gs && gfx_shader_stage(s->gs) != GFX_STAGE_GS)) why = "stage mismatch";
     else if (k->topo_class == 3) why = "patches need tessellation stages, which are not translated";
@@ -2827,7 +2956,7 @@ static Pipe *pipe_miss(const VkPipeState *s, const GKey *k, uint64_t h, int mode
         if (!add_stage(&B, s->vs, 0) || (s->fs && !add_stage(&F, s->fs, 0))) why = "too many bindings";
         else if (!(l = layout_pair(&B, &F))) why = "descriptor layout creation failed";
         fs_off = 0;
-    } else if (!why && (!add_stage(&B, s->vs, 0) || (s->gs && !add_stage(&B, s->gs, span - 1)) ||
+    } else if (!why && (!add_stage(&B, s->vs, 0) || (s->gs && !add_stage(&B, s->gs, span - 1)) || (s->ts && !add_stage(&B, s->ts, span - 1)) ||
                (s->fs && !add_stage(&B, s->fs, fs_off)))) why = "too many bindings";
     else if (!why && !l && !(l = layout_get(&B))) why = "descriptor layout creation failed";
     char lack[128];
@@ -2969,7 +3098,7 @@ static VkPipeline graphics(const VkPipeState *s, const VkPipeInfo **info, int as
                       : "builds its libraries itself (TOTK_PIPE_WAIT=draw)");
     }
     double end = wait_ms ? now_ms() + wait_ms : 0;
-    if (p && p->building && P.gpl && !s->gs && !p->info.pipeline && !p->fast_tried && p->lay) {
+    if (p && p->building && P.gpl && !s->gs && !mesh_vs(s) && !p->info.pipeline && !p->fast_tried && p->lay) {
         int final = 0, build = wait_ms != 0 && draw_build;
         uint64_t p0 = perf_begin(), t0 = qpc();
         if (build && U.on) {
@@ -3179,6 +3308,18 @@ static void prebuild_start(void) {
 }
 
 // A compute pipeline for cs in layout l; VK_NULL_HANDLE on failure. No lock needed (P.cache is driver-synchronised).
+// LOCAL TEST (Ocarina): SPIR-V words from which a compute shader builds in the background, unoptimized: shaders of 65,000 and 172,000 words froze
+// the replay for a minute or more. OOT_BIG_CS_WORDS sets it, 0 turns it off.
+static uint64_t big_cs_words(void) {
+    static uint64_t w = ~0ull;
+    if (w == ~0ull) {
+        const char *e = getenv("OOT_BIG_CS_WORDS");
+        w = e ? strtoull(e, NULL, 0) : (1u << 15);
+        if (!w) w = ~0ull - 1;
+    }
+    return w;
+}
+
 static VkPipeline compute_create(const GfxShader *cs, const Layout *l) {
     uint64_t words;
     const uint32_t *code = gfx_shader_spirv(cs, &words);
@@ -3190,6 +3331,18 @@ static VkPipeline compute_create(const GfxShader *cs, const Layout *l) {
                                                 .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = m, .pName = "main"},
                                       .layout = l->layout};
     pin_subgroup32(&ci.stage, &rqc, code, words);
+    {   // LOCAL TEST (Ocarina): a big guarded shader takes the driver minutes and over 30 GB: built without optimization, as Lichii #273 does for
+        // two shaders (they run slower). OOT_BIG_CS_OPT=1 keeps the optimizer.
+        static int opt = -1;
+        if (opt < 0) opt = getenv("OOT_BIG_CS_OPT") != NULL;
+        if (!opt && words >= big_cs_words()) ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+    }
+    {   // LOCAL TEST (Ocarina): shaders that compare a lane with their thread index, or count lanes, need every subgroup full; NVIDIA
+        // otherwise splits invocations differently from run to run, which made results differ from frame to frame.
+        uint32_t ls[3];
+        gfx_shader_local_size(cs, ls);
+        if (ci.stage.pNext && ls[0] && ls[0] % vk_caps.sg_size == 0) ci.stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+    }
     VkPipeline pipe = VK_NULL_HANDLE;
     if (vkCreateComputePipelines(P.device, P.cache, 1, &ci, NULL, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
     vkDestroyShaderModule(P.device, m, NULL);
@@ -3244,6 +3397,53 @@ static struct {
     int idle;                                          // build at PLAT_PRIO_IDLE (boot), normal (preparation)
     PlatMutex stat;
 } LB = {.stat = PLAT_MUTEX_INIT};
+
+// LOCAL TEST (Ocarina): compute shaders with guarded candidates reach 17-30 MB of SPIR-V; the driver takes a minute or more and over 30 GB
+// for one, and it ran on the replay thread under P.lock: the game froze at the first broken pot. A big shader is built here first, one at a
+// time, so memory stays bounded, and its dispatches are skipped until then; vk_pipeline_compute then finds it in the driver's pipeline cache.
+// ponytail: a linear table of 1024 shaders and a polling worker; a dispatch skipped this way loses its effect for those frames.
+enum { BIG_CS_N = 1024 };
+static struct { const GfxShader *cs; volatile int done; } big_cs[BIG_CS_N];
+static volatile int big_cs_n;
+static int big_cs_thread;
+
+static void big_cs_worker(void *arg) {
+    (void)arg;
+    for (int next = 0;;) {
+        if (next >= __atomic_load_n(&big_cs_n, __ATOMIC_ACQUIRE)) {
+            plat_sleep_ms(20);
+            continue;
+        }
+        const GfxShader *cs = big_cs[next].cs;
+        const char *why = NULL;
+        Bindings B = {0};
+        plat_mutex_lock(&P.lock);
+        Layout *l = compute_layout(cs, &B, &why);
+        plat_mutex_unlock(&P.lock);
+        uint64_t t0 = plat_now_ns();
+        VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
+        if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, pipe ? "" : " (failed)");
+        __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
+        next++;
+    }
+}
+
+int vk_pipeline_compute_ready(const GfxShader *cs) {
+    uint64_t words = 0;
+    if (!cs || !ensure_init()) return 1;
+    gfx_shader_spirv(cs, &words);
+    if (words < big_cs_words()) return 1;
+    int n = __atomic_load_n(&big_cs_n, __ATOMIC_RELAXED);   // only the replay thread adds
+    for (int i = 0; i < n; i++)
+        if (big_cs[i].cs == cs) return __atomic_load_n(&big_cs[i].done, __ATOMIC_ACQUIRE);
+    if (n == BIG_CS_N) return 1;
+    if (!big_cs_thread) big_cs_thread = plat_thread_spawn(big_cs_worker, NULL, "big compute", 0) ? 1 : -1;
+    if (big_cs_thread < 0) return 1;
+    big_cs[n].cs = cs;
+    __atomic_store_n(&big_cs_n, n + 1, __ATOMIC_RELEASE);
+    return 0;
+}
 
 VkPipeline vk_pipeline_compute(const GfxShader *cs, const VkPipeInfo **info) {
     if (info) *info = NULL;
@@ -3636,7 +3836,9 @@ void vk_pipeline_set_dynamic(VkCommandBuffer cb, const VkPipeState *s) {
     // NDC +y at row 0 as NVN does, so the framebuffer winding Vulkan tests is the one NVN tests (MacNativeGames passes
     // it to Metal unchanged; LAS Recomp exec.c mirrors it only for the lower-left origin).
     int front_cw = pl->front == NVN_FRONT_FACE_CW;
-    vkCmdSetCullMode(cb, (VkCullModeFlags)(pl->cull & 3));   // NVN_FACE_* has VkCullModeFlagBits' values
+    static int no_cull = -1;   // LOCAL TEST (Ocarina): OOT_NO_CULL=1 draws both faces of everything
+    if (no_cull < 0) no_cull = getenv("OOT_NO_CULL") != NULL;
+    vkCmdSetCullMode(cb, no_cull ? VK_CULL_MODE_NONE : (VkCullModeFlags)(pl->cull & 3));   // NVN_FACE_* has VkCullModeFlagBits' values
     vkCmdSetFrontFace(cb, front_cw ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
     vkCmdSetPrimitiveTopology(cb, vk_pipeline_topology(s->prim));
     vkCmdSetDepthTestEnable(cb, d->dt);

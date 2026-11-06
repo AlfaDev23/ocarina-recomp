@@ -1,0 +1,12 @@
+{
+  "_comment": "Ocarina of Time 1.1.1 ExeFS. Hashes only; no game data.",
+  "title_id": "0400486024DEC000",
+  "display_version": "1.1.1",
+  "exefs_sha256": {
+    "main": "f90499eeb596d67c730fac9b7e247b3a46d51d6f334c767aef071c9a783cccef",
+    "main.npdm": "94c154d83cbaca00d092958cc2b3a0494d7308fe49de8cb33ece7e9e67303ea7",
+    "rtld": "219f25ef4a64a704e86dacfeb25d9e8977045f2145e629268b94baf34d5e0bbe",
+    "sdk": "3ae3cd4cf340d72bdaba9e6f66016a74c1eae13737a5f7299375ed6654b9b1c5",
+    "subsdk0": "0d32c4bdbcfcfa1c4110c37eff18eaf70061a55090b7fedc741a2e37224065ba"
+  }
+}

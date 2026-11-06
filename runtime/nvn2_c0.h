@@ -6,7 +6,7 @@
 
 #include "nvn_obj.h"
 
-#define NVN2_C0_BYTES 0x800u
+#define NVN2_C0_BYTES 0xa00u   // LOCAL TEST (Ocarina): 0x800.. holds the reachable-buffer list (vk_exec_draw.c dyn_collect)
 #define NVN2_ROOT_TABLES 8
 #define NVN2_ROOT_WORDS 64
 

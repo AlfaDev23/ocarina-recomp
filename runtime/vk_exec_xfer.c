@@ -116,7 +116,7 @@ static void counter_cb(void *arg) {
 
 // Reports queued by the replay that the GPU has not finished. The condition of RENDER_COND reads a timestamp one as 0
 // and a samples-passed one as unknown.
-#define PENDING 256
+#define PENDING 32768   // Ocarina makes hundreds of samples-passed reports a frame: at 256 a timestamp report fell out, its condition read stale memory and a clear ran (seedds/nxnative "Report tables that dropped entries")
 static struct { uint64_t addr, fence; int unknown; } pending[PENDING];
 static unsigned pending_head;
 
@@ -189,7 +189,10 @@ static void oq_close(VkExec *ex) {
     oq_open = -1;
 }
 
+static int oq_fake_drew;           // LOCAL TEST (Ocarina): OOT_OQ_FAKE: a draw since the last reset or report
+static uint64_t fake_samples;      // and what the next report says
 void vk_exec_oq_draw(VkExec *ex) {
+    oq_fake_drew = 1;
     if (!oq_counting || oq_open >= 0) return;
     uint32_t q = oq_next % OQ_N;
     if (__atomic_load_n(&oq_busy[q], __ATOMIC_ACQUIRE)) {
@@ -239,6 +242,16 @@ static void oq_cb(void *arg) {
         }
         i = j;
     }
+    {   // LOCAL TEST (Ocarina): OOT_OQ_LOG=<present>: 400 lines of this sequence from that present on
+        static long from = -2;
+        static int left = 400;
+        if (from == -2) { const char *e = getenv("OOT_OQ_LOG"); from = e ? atol(e) : -1; }
+        if (from >= 0 && left > 0 && (long)__atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED) >= from) {
+            left--;
+            rt_log("oq: frame %llu %s addr %#llx segs %u sum %llu total %llu", (unsigned long long)__atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED),
+                   s->reset ? "reset" : "report", (unsigned long long)s->addr, s->n, (unsigned long long)sum, (unsigned long long)oq_count);
+        }
+    }
     if (s->reset) oq_count = 0;
     else {
         oq_count += sum;
@@ -260,6 +273,7 @@ static void oq_segment(VkExec *ex, uint64_t addr, int reset) {
 }
 
 static void reset_counter(VkExec *ex, const p_reset_counter *p) {
+    if (p->type == NVN_COUNTER_TYPE_SAMPLES_PASSED) oq_fake_drew = 0, fake_samples = 0;
     if (p->type != NVN_COUNTER_TYPE_SAMPLES_PASSED || !oq_ready()) return;
     oq_segment(ex, 0, 1);
     oq_counting = 1, oq_reported = 0;
@@ -285,6 +299,18 @@ static void signal_event(VkExec *ex, const p_signal_event *p) {
 }
 
 static void report_counter(VkExec *ex, const p_report_counter *p) {
+    static int fake = -1;   // LOCAL TEST (Ocarina): OOT_OQ_FAKE=1: every samples-passed report says "visible" at once
+    if (fake < 0) fake = getenv("OOT_OQ_FAKE") != NULL;
+    if (fake && p->type == NVN_COUNTER_TYPE_SAMPLES_PASSED) {
+        // A draw since the reset passed everything; none passed nothing (reports used as a zero reference stay 0). It also
+        // grows across reports, for games taking end - begin.
+        fake_samples += oq_fake_drew ? 100000 : 0;
+        oq_fake_drew = 0;
+        if (!nvn_gpu_only(p->addr)) write_counter(p->addr, fake_samples);
+        static int told;
+        if (!told++) rt_log("vk: LOCAL TEST: samples-passed reports are faked");
+        return;
+    }
     int samples = p->type == NVN_COUNTER_TYPE_SAMPLES_PASSED && oq_ready();
     if (nvn_gpu_only(p->addr)) {   // CPU-invisible pool: no host memory behind it
         if (samples) oq_report(ex, 0);
@@ -311,7 +337,8 @@ static int counter_word(uint64_t addr, uint64_t *v) {
     uint64_t done = vk_sync_fence_done();
     for (unsigned k = 1; k <= PENDING; k++) {   // newest first: the last report to addr decides
         unsigned i = (pending_head - k) % PENDING;
-        if (pending[i].addr == addr && pending[i].fence > done) return *v = 0, pending[i].unknown ? 2 : 1;
+        if (pending[i].fence <= done) break;   // newest first, fences only grow: nothing older is pending
+        if (pending[i].addr == addr) return *v = 0, pending[i].unknown ? 2 : 1;
     }
     VkMemSpan m;
     if (nvn_gpu_only(addr) || !vk_mem_resolve(addr, sizeof *v, &m)) return 0;

@@ -200,12 +200,25 @@ int gfx_window_monitor_size(int *w, int *h) {
     return 1;
 }
 
+// Type the cook's name in the game window. A secret from Miojo: see the README.
+static void miojo_key(HWND h, WPARAM w, LPARAM l) {
+    static const char name[] = "MIOJO";
+    static int at;
+    if (l & (1 << 30)) return;   // bit 30: auto-repeat
+    at = w == (WPARAM)name[at] ? at + 1 : w == 'M';
+    if (name[at]) return;
+    at = 0;
+    SetWindowTextW(h, L"Ocarina Recomp - feito com miojo");
+    menu_miojo();
+}
+
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     LRESULT input_res;
     if (input_window_msg(h, m, w, l, &input_res)) return input_res;
     if (menu_window_msg(h, m, w, l, &input_res)) return input_res;
     switch (m) {
     case WM_KEYDOWN:
+        miojo_key(h, w, l);
         if (w == VK_F11 && !(l & (1 << 30))) {   // bit 30: auto-repeat
             input_cursor_suspend(1);
             toggle_fullscreen(h);
@@ -299,7 +312,7 @@ static void window_main(void *arg) {
     // button flashes until it is brought up, and TOTK_FULLSCREEN waits for that first activation.
     // TOTK_BACKGROUND_WINDOW=1 (test runs): no flashing, never fullscreen at start, and F11 keeps the window's place.
     int background = g_background = cfg_get("TOTK_BACKGROUND_WINDOW") && atoi(cfg_get("TOTK_BACKGROUND_WINDOW"));
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"DKB Recomp", WND_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, ow, oh, NULL,
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"Ocarina Recomp", WND_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, ow, oh, NULL,
                              NULL, inst, NULL);
     if (!g_hwnd) {
         rt_log("gfx: CreateWindowEx failed (%lu)", GetLastError());

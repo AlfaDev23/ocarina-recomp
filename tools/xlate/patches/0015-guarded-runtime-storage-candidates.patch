@@ -66,10 +66,21 @@
  
 --- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
 +++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
-@@ -234,6 +234,13 @@
+@@ -234,6 +234,24 @@
              Operand e1,
              Operand value)
          {
++            // LOCAL TEST (Ocarina): the game's light and fog accumulators add floats atomically: a compare-and-swap loop.
++            if (storageKind == StorageKind.GlobalMemory && type == AtomSize.F32FtzRn && op == AtomOp.Add &&
++                context.TranslatorContext.GpuAccessor.QueryStorageBufferRuntimeCandidates())
++            {
++                Operand retry = Label();
++                context.MarkLabel(retry);
++                Operand old = context.Load(storageKind, e0, e1);
++                Operand seen = context.AtomicCompareAndSwap(storageKind, e0, e1, old, context.FPAdd(old, value));
++                context.BranchIfFalse(retry, context.ICompareEqual(seen, old));
++                return old;
++            }
 +            if (storageKind == StorageKind.GlobalMemory &&
 +                context.TranslatorContext.GpuAccessor.QueryStorageBufferRuntimeCandidates() &&
 +                (type is not (AtomSize.S32 or AtomSize.U32) ||
@@ -235,7 +246,7 @@
              SearchResult result = FindUniqueBaseAddressCb(gtsContext, block, globalAddress, needsOffset: true);
  
              if (result.Found)
-@@ -393,6 +407,151 @@
+@@ -393,6 +407,162 @@
  
                  return GenerateCallStorageOp(node, operation, null, functionId);
              }
@@ -314,9 +325,20 @@
 +                }
 +            }
 +
++            // LOCAL TEST (Ocarina): the address does not come straight from a constant buffer, so it may be a pointer read
++            // from memory, which no static search finds. The runtime lists, per dispatch, the buffers reachable from the bound
++            // tables at c0 + 0x800 (vk_exec_draw.c dyn_collect); the range guards pick the one that holds the address.
++            if (!FindUniqueBaseAddressCb(gtsContext, block, operation.GetSource(0), needsOffset: false).Found)
++            {
++                for (int index = 0; index < 32; index++)
++                {
++                    AddCandidate(new SearchResult(0, (0x800 + 16 * index) / 4));
++                }
++            }
++
 +            if (candidates.Count == 0)
 +            {
-+                throw new NotSupportedException("No bounded cbuf-pair candidate found for global operation.");
++                gpuAccessor.Log("LOCAL TEST (Ocarina): no bounded candidate: this global operation reads zero and drops its writes.");
 +            }
 +            if (gtsContext.TryGetFunctionId(operation, true, candidates, out int functionId, guarded: true))
 +            {
@@ -335,7 +357,7 @@
 +                bool write = operation.Inst == Instruction.Store || operation.Inst.IsAtomic();
 +                if (!resourceManager.TryGetStorageBufferBinding(slot, offset, write, out int binding, guarded: true))
 +                {
-+                    throw new NotSupportedException("Storage candidates exceed the descriptor resource limit.");
++                    continue; // LOCAL TEST (Ocarina): the extra candidates read zero, the dispatch still runs
 +                }
 +
 +                // Match the host exactly: without an explicit unaligned-storage

@@ -1,0 +1,31 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
+@@ -830,7 +830,7 @@
+ 
+             if (targetCbs.Count == 0)
+             {
+-                gpuAccessor.Log($"Failed to find storage buffer for global memory operation \"{operation.Inst}\".");
++                gpuAccessor.Log($"Failed to find storage buffer for global memory operation \"{operation.Inst}\" address {DescribeAddress(operation.GetSource(0), 6)}");
+             }
+ 
+             if (gtsContext.TryGetFunctionId(operation, isMultiTarget: true, targetCbs, out functionId))
+@@ -947,6 +947,19 @@
+             functionId = gtsContext.AddFunction(operation, isMultiTarget: true, targetCbs, function);
+ 
+             return true;
++        }
++
++        // LOCAL TEST (Ocarina): the expression behind an address nothing resolved.
++        private static string DescribeAddress(Operand o, int depth)
++        {
++            if (o.Type == OperandType.Constant) return "#" + o.Value.ToString("x");
++            if (o.Type == OperandType.ConstantBuffer) return "cb" + o.GetCbufSlot() + "[" + o.GetCbufOffset() + "]";
++            if (o.AsgOp is PhiNode phi) return "phi" + phi.SourcesCount;
++            if (o.AsgOp is not Operation op) return o.Type.ToString();
++            if (depth == 0) return op.Inst.ToString() + "..";
++            string args = "";
++            for (int i = 0; i < op.SourcesCount; i++) args += (i != 0 ? "," : "") + DescribeAddress(op.GetSource(i), depth - 1);
++            return op.Inst + (op.StorageKind != StorageKind.None ? ":" + op.StorageKind : "") + "(" + args + ")";
+         }
+ 
+         private static uint PackCbSlotAndOffset(int cbSlot, int cbOffset)

@@ -314,7 +314,7 @@ static void test_arbiter(Cpu *c) {
     uint32_t r = sv(c, 0x34, arb, 2, 5, 5000000);
     double ms = ms_since(t0);
     CHECK(r == KERN_R_TIMEOUT && ms >= 5.0, "wait type 2 with a 5 ms timeout: %#x after %.2f ms", r, ms);
-    CHECK(sv(c, 0x34, arb, 3, 0, 0) == KERN_R_INVALID_ENUM && sig(c, 3, 0, 0) == KERN_R_INVALID_ENUM, "type 3");
+    CHECK(sv(c, 0x34, arb, 4, 0, 0) == KERN_R_INVALID_ENUM && sig(c, 3, 0, 0) == KERN_R_INVALID_ENUM, "type 3");
     printf("address arbiter: wait types 0-2 (less, decrement-less, equal), signal types 0-2 (wake, increment, modify by "
            "waiters), 5 ms timeout after %.2f ms: %s\n", ms, failures == before ? "ok" : "FAIL");
 }

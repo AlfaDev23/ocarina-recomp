@@ -48,6 +48,8 @@ static const uint8_t *image_map;
 static char image_file[2048];
 static char index_dir[2048];         // the directory of romfs-index.bin: the proof file's default place
 static char mount_name[32];
+// LOCAL TEST (Ocarina): the SDK mounts the same RomFS a second time as "_npln". ponytail: one extra name.
+static char mount_alias[32];
 static PlatMutex lock = PLAT_MUTEX_INIT;
 static uint64_t handles[NH];         // file index + 1; 0 is free
 static uint32_t handle_ovl[NH];      // overlay slot + 1 of an open handle, 0 = original
@@ -560,8 +562,9 @@ const char *romfs_overlay(size_t k, const char **file, uint64_t *size, int *is_a
 }
 
 int romfs_owns(const char *path) {
-    size_t n = strlen(mount_name);
-    return n && path && !strncmp(path, mount_name, n) && path[n] == ':';
+    size_t n = strlen(mount_name), m = strlen(mount_alias);
+    return path && ((n && !strncmp(path, mount_name, n) && path[n] == ':') ||
+                    (m && !strncmp(path, mount_alias, m) && path[m] == ':'));
 }
 
 int romfs_handle(uint64_t h) { return h > ROMFS_HANDLE_BASE && h < ROMFS_HANDLE_BASE + NH; }
@@ -572,8 +575,12 @@ uint32_t romfs_mount(const char *name) {
         strchr(name, ':'))
         return FS_R_INVALID;
     plat_mutex_lock(&lock);
-    if (*mount_name && strcmp(name, mount_name)) rt_fatal("second RomFS mount %s (%s is mounted)", name, mount_name);
-    strcpy(mount_name, name);
+    if (*mount_name && strcmp(name, mount_name)) {
+        if (*mount_alias && strcmp(name, mount_alias)) rt_fatal("third RomFS mount %s", name);
+        strcpy(mount_alias, name);
+    } else {
+        strcpy(mount_name, name);
+    }
     plat_mutex_unlock(&lock);
     rt_log("fs mount %s: -> RomFS", name);
     return 0;
@@ -582,7 +589,7 @@ uint32_t romfs_mount(const char *name) {
 uint32_t romfs_open(uint64_t *out, const char *path, int mode) {
     fs_trace("rom", path);
     if (!out || mode != FS_OPEN_READ) return FS_R_UNSUPPORTED_OPEN;
-    const char *p = romfs_path_relative(mount_name, path);
+    const char *p = romfs_path_relative(*mount_alias && !strncmp(path ? path : "", mount_alias, strlen(mount_alias)) ? mount_alias : mount_name, path);
     if (!p) return FS_R_PATH_NOT_FOUND;
     uint64_t i = file_index(p);
     if (i == UINT64_MAX) return FS_R_PATH_NOT_FOUND;
@@ -679,7 +686,7 @@ void romfs_close(uint64_t h) {
 
 uint32_t romfs_entry_type(int *out, const char *path) {
     if (!out) return FS_R_INVALID;
-    const char *p = romfs_path_relative(mount_name, path);
+    const char *p = romfs_path_relative(*mount_alias && !strncmp(path ? path : "", mount_alias, strlen(mount_alias)) ? mount_alias : mount_name, path);
     if (!p) return FS_R_PATH_NOT_FOUND;
     if (file_index(p) != UINT64_MAX) {
         *out = FS_ENTRY_FILE;
@@ -710,5 +717,6 @@ static void ov_initialize(Cpu *c) {
 }
 
 HOST_OVERRIDE("_ZN2nn2fs8MountRomEPKcPvm", ov_mount_rom);
+HOST_OVERRIDE("_ZN2nn2fs8MountRomEPKc", ov_mount_rom);   // newer SDKs: no cache arguments
 HOST_OVERRIDE("_ZN2nn2fs22QueryMountRomCacheSizeEPm", ov_query_cache);
 HOST_OVERRIDE("_ZN2nn2fs24InitializeForApplicationEv", ov_initialize);

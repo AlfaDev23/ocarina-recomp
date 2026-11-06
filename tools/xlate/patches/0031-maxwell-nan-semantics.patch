@@ -1,0 +1,57 @@
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
+@@ -334,7 +334,7 @@
+ 
+         private static OperationResult GenerateClamp(CodeGenContext context, AstOperation operation)
+         {
+-            return GenerateTernary(context, operation, context.Delegates.GlslFClamp, context.Delegates.GlslSClamp);
++            return GenerateTernary(context, operation, context.GlslNClamp, context.Delegates.GlslSClamp);
+         }
+ 
+         private static OperationResult GenerateClampU32(CodeGenContext context, AstOperation operation)
+@@ -967,7 +967,7 @@
+ 
+         private static OperationResult GenerateMaximum(CodeGenContext context, AstOperation operation)
+         {
+-            return GenerateBinary(context, operation, context.Delegates.GlslFMax, context.Delegates.GlslSMax);
++            return GenerateBinary(context, operation, context.GlslNMax, context.Delegates.GlslSMax);
+         }
+ 
+         private static OperationResult GenerateMaximumU32(CodeGenContext context, AstOperation operation)
+@@ -983,7 +983,7 @@
+ 
+         private static OperationResult GenerateMinimum(CodeGenContext context, AstOperation operation)
+         {
+-            return GenerateBinary(context, operation, context.Delegates.GlslFMin, context.Delegates.GlslSMin);
++            return GenerateBinary(context, operation, context.GlslNMin, context.Delegates.GlslSMin);
+         }
+ 
+         private static OperationResult GenerateMinimumU32(CodeGenContext context, AstOperation operation)
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitConversion.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitConversion.cs
+@@ -218,6 +218,16 @@
+                 srcB = context.FPMaximum(srcB, c0, fpType);
+             }
+ 
++            // Maxwell F2I saturates to the integer range and gives 0 for NaN; SPIR-V leaves both undefined (from jaigner-hub/ocarina-of-time-recomp patch 0018).
++            Operand isNan = srcType == DstFmt.F64 ? null : context.IsNan(srcB, fpType);
++
++            if (srcType != DstFmt.F64)
++            {
++                srcB = isSignedInt
++                    ? context.FPMinimum(context.FPMaximum(srcB, ConstF(-2147483648f), fpType), ConstF(2147483520f), fpType)
++                    : context.FPMinimum(srcB, ConstF(4294967040f), fpType);
++            }
++
+             if (srcType == DstFmt.F64)
+             {
+                 srcB = isSignedInt
+@@ -229,6 +239,8 @@
+                 srcB = isSignedInt
+                     ? context.FP32ConvertToS32(srcB)
+                     : context.FP32ConvertToU32(srcB);
++
++                srcB = context.ConditionalSelect(isNan, Const(0), srcB);
+             }
+ 
+             if (isSmallInt)

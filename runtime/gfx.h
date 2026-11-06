@@ -107,6 +107,8 @@ typedef struct {
     uint8_t separate;           // TEX: texture and sampler handles are separate
 } GfxShaderRes;
 typedef struct { uint8_t type, comps, packed, scalar_bits; } GfxShaderIo;   // scalar_bits: actual numeric SPIR-V width, 0 unknown
+int gfx_shader_is_task(const GfxShader *s);
+int gfx_shader_is_mesh(const GfxShader *s);                 // LOCAL TEST (Ocarina): a mesh program in the vertex slot
 int gfx_shader_stage(const GfxShader *s);                   // GFX_STAGE_VS, GFX_STAGE_GS, GFX_STAGE_FS or GFX_STAGE_CS
 typedef struct {
     uint32_t version, input, input_vertices, output, invocations, max_output_vertices, passthrough;

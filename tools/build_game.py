@@ -78,7 +78,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # them. MAIN_ROOT is where they land, so resolved paths still print and compare relative to a root.
 MAIN_ROOT = (ROOT / 'build').resolve().parent
 UCRT = Path(r'C:\msys64\ucrt64\bin')
-EXE = 'dkb.exe' if WIN else 'dkb'   # DKB Recomp: not TotK's executable
+EXE = 'ocarina.exe' if WIN else 'ocarina'
 
 
 def on_path(name):
@@ -101,7 +101,7 @@ if WIN:
     RT_FLAGS.append('-D_WIN32_WINNT=0x0A00')
     # -Xlinker passes the map path as one argument; -Wl, would split it at any comma in the build dir path
     LINK_FLAGS = ['-fuse-ld=lld', '-Wl,--stack,16777216', '-Xlinker', '"--Map=$builddir/totk.map"']   # the map feeds tools/prof_report.py
-    LINK_LIBS = ['-lpsapi', '-lbcrypt', '-lvulkan-1', '-luser32', '-lgdi32', '-ldwmapi', '-limm32', '-lwinmm', '-lSDL3', '-lopus', '-l:libvpx.a', '-l:libzstd.a', '-l:libstdc++.a', '-l:libwinpthread.a']   # Vulkan back end; libvpx static (movies); libzstd static (resolution.c)
+    LINK_LIBS = ['-lpsapi', '-lbcrypt', '-lvulkan-1', '-luser32', '-lgdi32', '-ldwmapi', '-limm32', '-lwinmm', '-lSDL3', '-lopus', '-l:libdav1d.a', '-l:libvpx.a', '-l:libzstd.a', '-l:libstdc++.a', '-l:libwinpthread.a']   # Vulkan back end; libvpx static (movies); libzstd static (resolution.c)
     VMA_INCLUDE = UCRT.parent / 'include' / 'vma'   # vk_mem_alloc.h; MSYS2 package vulkan-memory-allocator
 else:
     # -no-pie: the lifted modules' function tables (hundreds of thousands of pointers) need no load-time relocation.

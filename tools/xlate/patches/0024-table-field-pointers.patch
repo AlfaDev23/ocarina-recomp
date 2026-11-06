@@ -1,0 +1,87 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
+@@ -388,6 +388,37 @@
+             }
+             else
+             {
++                // NVN 2: the base pointer sits in a fixed field of a bound table (table at c0, field K). Binding 30 is
++                // resolved by the runtime at each draw: it reads the pointer from the table and binds what it points at.
++                if (FindLoadedPointer(globalAddress, 16, out Operand tablePointer, out int tableWord, out int tableField) &&
++                    tableWord < 1024 && tableField % 4 == 0 && tableField / 4 < 64)
++                {
++                    SearchResult loaded = new(30, tableWord | (tableField / 4) << 10);
++                    Operand hostOffset = Local();
++                    if (gpuAccessor.QueryHasUnalignedStorageBuffer())
++                    {
++                        Operand masked = Local();
++                        node.List.AddBefore(node, new Operation(Instruction.BitwiseAnd, masked, tablePointer, Const(-gpuAccessor.QueryHostStorageBufferOffsetAlignment())));
++                        node.List.AddBefore(node, new Operation(Instruction.Subtract, hostOffset, globalAddress, masked));
++                    }
++                    else
++                    {
++                        node.List.AddBefore(node, new Operation(Instruction.Subtract, hostOffset, globalAddress, tablePointer));
++                    }
++
++                    if (CanUseInlineStorageOp(operation, targetLanguage))
++                    {
++                        return GenerateInlineStorageOp(resourceManager, node, operation, hostOffset, loaded);
++                    }
++
++                    if (!TryGenerateSingleTargetStorageOp(gtsContext, resourceManager, targetLanguage, operation, loaded, out int loadedFunction))
++                    {
++                        return null;
++                    }
++
++                    return GenerateCallStorageOp(node, operation, hostOffset, loadedFunction);
++                }
++
+                 // Failed to find the storage buffer directly.
+                 // Try to walk through Phi chains and find all possible constant buffers where
+                 // the base address might be stored.
+@@ -946,6 +977,46 @@
+ 
+             functionId = gtsContext.AddFunction(operation, isMultiTarget: true, targetCbs, function);
+ 
++            return true;
++        }
++
++        // address = ... + Load(table, (cb0[w] + K - (cb0[w] & -16)) >> 2): the load, w and K.
++        private static bool FindLoadedPointer(Operand address, int depth, out Operand pointer, out int word, out int field)
++        {
++            pointer = null;
++            word = field = 0;
++            if (depth == 0 || address.AsgOp is not Operation op)
++            {
++                return false;
++            }
++
++            if (op.Inst == Instruction.Add)
++            {
++                return FindLoadedPointer(op.GetSource(0), depth - 1, out pointer, out word, out field) ||
++                       FindLoadedPointer(op.GetSource(1), depth - 1, out pointer, out word, out field);
++            }
++
++            if (op.Inst != Instruction.Load || op.StorageKind != StorageKind.StorageBuffer || op.SourcesCount < 3 ||
++                op.GetSource(2).AsgOp is not Operation shift || shift.Inst != Instruction.ShiftRightU32 ||
++                shift.GetSource(0).AsgOp is not Operation sub || sub.Inst != Instruction.Subtract)
++            {
++                return false;
++            }
++
++            Operand start = sub.GetSource(0);
++            if (start.AsgOp is Operation add && add.Inst == Instruction.Add && add.GetSource(1).Type == OperandType.Constant)
++            {
++                field = add.GetSource(1).Value;
++                start = add.GetSource(0);
++            }
++
++            if (start.Type != OperandType.ConstantBuffer || start.GetCbufSlot() != 0)
++            {
++                return false;
++            }
++
++            word = start.GetCbufOffset();
++            pointer = address;
+             return true;
+         }
+ 

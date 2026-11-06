@@ -1397,6 +1397,7 @@ static RtThread *thr_new(int prio, int core, uint64_t mask) {
 
 static void thr_link(RtThread *t) {   // holding G
     t->handle = h_new(O_THREAD, t);
+    *(uint32_t *)(t->tlr + 0x110) = t->handle;   // ThreadLocalRegion.current_thread_handle: newer SDKs compare mutex tags with it
     t->id = g_next_id++;
     t->all = g_all;
     g_all = t;
@@ -1849,13 +1850,18 @@ int kern_svc(Cpu *c, uint32_t imm) {
         uint64_t addr = x[0];
         int type = (int)x[1];
         int32_t val = (int32_t)x[2];
-        if (type < 0 || type > 2) {
+        if (type < 0 || type > 3) {
             x[0] = R_INVALID_ENUM;
+            return 1;
+        }
+        if (type == 3 && (addr & 7)) {   // WaitIfEqual64 (newer SDKs: Ocarina's allocator mutex)
+            x[0] = R_BAD_STATE;   // ponytail: the real kernel answers an invalid address here
             return 1;
         }
         lock();
         uint32_t r, v = ld32(addr);
-        int ok = type == 2 ? (int32_t)v == val : (int32_t)v < val;
+        int ok = type == 3 ? ((uint64_t)v | (uint64_t)ld32(addr + 4) << 32) == x[2]
+                           : type == 2 ? (int32_t)v == val : (int32_t)v < val;
         if (ok && type == 1)
             while (!cas32(addr, &v, v - 1))
                 if (!((int32_t)v < val)) {
@@ -2133,8 +2139,13 @@ static Fiber *fiber_find(uint64_t addr) {
 
 static void fiber_switch_to(RtThread *t, const Cpu *from, Fiber *to);
 
+// A fiber can resume on another thread (Ocarina's nn::async does). The compiler treats the address of a thread-local as
+// constant inside a function, so a function that runs across a host fiber switch must read tcur through this call: a stale
+// read sends the fiber back to the base fiber of a thread it left, and two threads then share one host stack.
+__attribute__((noinline)) static RtThread *tcur_fresh(void) { return tcur; }
+
 // After a host fiber switch: release the context left behind, and finish an ExitThread issued on a fiber.
-static void fiber_resumed(void) {
+__attribute__((noinline)) static void fiber_resumed(void) {
     RtThread *t = tcur;
     rt_fpcr_sync(t->cur);   // the host fiber resumes with its own MXCSR (platform.h fibers switch it)
     if (t->leaving) {
@@ -2148,14 +2159,14 @@ static void fiber_main(void *p) {
     Fiber *f = p;
     fiber_resumed();
     Cpu *c = f->cpu;
-    tcur->host_depth = 0;   // a new fiber starts at the top level; each context restores its own depth on resume
+    tcur_fresh()->host_depth = 0;   // a new fiber starts at the top level; each context restores its own depth on resume
     uint64_t next = rt_call(c, f->func, 1, f->arg);
     f->state = F_DONE;
     Fiber *n = NULL;
     if (next && !(n = fiber_find(next)))
         rt_fatal("fiber %#llx returned %#llx, which is not an initialized fiber", (unsigned long long)f->addr,
                  (unsigned long long)next);
-    fiber_switch_to(tcur, c, n);   // NULL: back to the thread's own context
+    fiber_switch_to(tcur_fresh(), c, n);   // NULL: back to the thread's own context
     rt_fatal("fiber %#llx resumed after it finished", (unsigned long long)f->addr);
 }
 
@@ -2186,7 +2197,10 @@ static void fiber_switch_to(RtThread *t, const Cpu *from, Fiber *to) {
     t->cur = dst;
     int depth = t->host_depth;
     plat_fiber_switch(to ? to->host : t->base_fiber);
-    t->host_depth = depth;
+    RtThread *now = tcur_fresh();
+    static int moved;
+    if (now != t && !__atomic_exchange_n(&moved, 1, __ATOMIC_RELAXED)) rt_log("kernel: LOCAL TEST: a fiber resumed on another thread");
+    now->host_depth = depth;
     fiber_resumed();
 }
 
@@ -2244,8 +2258,8 @@ void kern_fiber_finalize(Cpu *c) {
 void kern_fiber_switch(Cpu *c) {
     RtThread *t = tcur;
     if (!t) rt_fatal("SwitchToFiber on a host thread");
-    Fiber *to = fiber_find(c->x[0]);
-    if (!to) rt_fatal("SwitchToFiber(%#llx): not an initialized fiber", (unsigned long long)c->x[0]);
+    Fiber *to = c->x[0] ? fiber_find(c->x[0]) : NULL;   // NULL: back to the thread's own context (newer SDKs' nn::async)
+    if (c->x[0] && !to) rt_fatal("SwitchToFiber(%#llx): not an initialized fiber", (unsigned long long)c->x[0]);
     if (to == t->fiber) return;
     fiber_switch_to(t, c, to);
 }

@@ -1026,15 +1026,47 @@ static uint32_t delete_recursive(const char *path) {
 }
 
 static uint32_t open_directory(uint64_t *out, const char *path, int mode) {
-    if (romfs_owns(path)) rt_fatal("fs: OpenDirectory on the RomFS (%s) is not implemented", path);
-    char p[PATH_CAP];
-    uint32_t r = host_path(path, p, sizeof p);
-    if (r) return r;
     if (!out || mode < 1 || mode > 3) return FS_R_INVALID_ARGUMENT;
-    if (plat_fs_kind(p) != PLAT_FS_DIR) return FS_R_PATH_NOT_FOUND;
     Listing l;
-    int e = list_dir(p, &l);
-    if (e) return fs_result(e);
+    if (romfs_owns(path)) {
+        // The folder's direct children from the RomFS index. ponytail: a scan of the whole index per open, and a
+        // linear check for repeated folders; add a folder table if a game opens many directories.
+        int type;
+        uint32_t rr = romfs_entry_type(&type, path);
+        const char *rel = strchr(path, ':');
+        rel = rel ? rel + 1 : path;
+        while (*rel == '/') rel++;
+        size_t relen = strlen(rel);
+        while (relen && rel[relen - 1] == '/') relen--;
+        if (relen && (rr || type != FS_ENTRY_DIRECTORY)) return rr ? rr : FS_R_PATH_NOT_FOUND;
+        l = (Listing){0};
+        uint64_t count = romfs_file_count();
+        for (uint64_t i = 0; i < count; i++) {
+            uint64_t size;
+            const char *name = romfs_entry(i, NULL, &size);
+            while (name && *name == '/') name++;
+            if (!name) continue;
+            if (relen && (strncmp(name, rel, relen) || name[relen] != '/')) continue;
+            const char *child = relen ? name + relen + 1 : name;
+            const char *slash = strchr(child, '/');
+            char one[769];
+            size_t k = slash ? (size_t)(slash - child) : strlen(child);
+            if (!k || k >= sizeof one) continue;
+            memcpy(one, child, k);
+            one[k] = 0;
+            int repeated = 0;
+            if (slash)
+                for (int j = 0; j < l.n && !repeated; j++) repeated = l.e[j].kind == PLAT_FS_DIR && !strcmp(l.e[j].name, one);
+            if (!repeated) listing_add(one, slash ? PLAT_FS_DIR : PLAT_FS_FILE, slash ? 0 : size, &l);
+        }
+    } else {
+        char p[PATH_CAP];
+        uint32_t r = host_path(path, p, sizeof p);
+        if (r) return r;
+        if (plat_fs_kind(p) != PLAT_FS_DIR) return FS_R_PATH_NOT_FOUND;
+        int e = list_dir(p, &l);
+        if (e) return fs_result(e);
+    }
     plat_mutex_lock(&lock);
     for (int i = 0; i < NDIRS; i++)
         if (!dirs[i].used) {
@@ -1098,6 +1130,18 @@ static void ov_rename_file(Cpu *c) { ret_x(c, rename_file(arg_p(c, 0), arg_p(c, 
 static void ov_create_directory(Cpu *c) { ret_x(c, create_directory(arg_p(c, 0))); }
 static void ov_delete_recursive(Cpu *c) { ret_x(c, delete_recursive(arg_p(c, 0))); }
 static void ov_open_directory(Cpu *c) { ret_x(c, open_directory(arg_p(c, 0), arg_p(c, 1), I32(2))); }
+// Result GetDirectoryEntryCount(int64_t *out, DirectoryHandle h): the entries of the mode still to read
+static void ov_dir_count(Cpu *c) {
+    int64_t *out = arg_p(c, 0);
+    uint64_t h = arg_x(c, 1);
+    if (h < DIR_BASE || h >= DIR_BASE + NDIRS || !dirs[h - DIR_BASE].used || !out) { ret_x(c, FS_R_INVALID_ARGUMENT); return; }
+    Dir *d = &dirs[h - DIR_BASE];
+    int64_t n = 0;
+    for (int i = d->next; i < d->n; i++) n += (d->mode & (d->e[i].kind == PLAT_FS_DIR ? 1 : 2)) != 0;
+    *out = n;
+    ret_x(c, 0);
+}
+HOST_OVERRIDE("_ZN2nn2fs22GetDirectoryEntryCountEPlNS0_15DirectoryHandleE", ov_dir_count);
 static void ov_read_directory(Cpu *c) { ret_x(c, read_directory(arg_p(c, 0), arg_p(c, 1), arg_x(c, 2), I64(3))); }
 static void ov_close_directory(Cpu *c) { close_directory(arg_x(c, 0)); }
 static void ov_mount_save(Cpu *c) { ret_x(c, mount_save(arg_p(c, 0), arg_p(c, 1))); }

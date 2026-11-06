@@ -198,6 +198,7 @@ typedef struct {
     VkPhysicalDeviceProvokingVertexFeaturesEXT pv;
     VkPhysicalDeviceRobustness2FeaturesEXT rob2;
     VkPhysicalDeviceFaultFeaturesEXT fault;
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh;
     VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT fsi;
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT gpl;
     VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbl;
@@ -232,6 +233,7 @@ static int create_device(void) {
     OPTIONAL_EXT(has_transform_feedback, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME, xfb, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT);
     OPTIONAL_EXT(has_provoking_vertex, VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME, pv, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT);
     OPTIONAL_EXT(has_robustness2, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME, rob2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT);
+    OPTIONAL_EXT(has_mesh_shader, VK_EXT_MESH_SHADER_EXTENSION_NAME, mesh, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT);
     OPTIONAL_EXT(has_device_fault, VK_EXT_DEVICE_FAULT_EXTENSION_NAME, fault, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT);
     // Ryujinx's SPIR-V declares fragment shader interlock whenever the host reports it (vk_pipeline.c spirv_fixup).
     OPTIONAL_EXT(has_fragment_shader_interlock, VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME, fsi,
@@ -284,6 +286,8 @@ static int create_device(void) {
     else if (!h->geometryShader) miss = "geometryShader";
     else if (!h->textureCompressionBC) miss = "textureCompressionBC";
     if (miss) { rt_log("vk: required feature missing on %s: %s", g_vk.props.deviceName, miss); free(c); return 0; }
+    if (!c->mesh.meshShader) g_vk.has_mesh_shader = 0;
+    c->mesh.multiviewMeshShader = c->mesh.primitiveFragmentShadingRateMeshShader = c->mesh.meshShaderQueries = 0;   // need features not enabled
     if (!c->fault.deviceFault) g_vk.has_device_fault = 0;   // vkGetDeviceFaultInfoEXT needs the feature, not just the extension
     g_vk.has_buffer_device_address = c->f12.bufferDeviceAddress;
     g_vk.has_astc_ldr = h->textureCompressionASTC_LDR;

@@ -1,0 +1,14 @@
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/SpirvGenerator.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/SpirvGenerator.cs
+@@ -354,7 +354,10 @@
+                     SpvInstruction a = c.Load(u32, Word(bytes));
+                     SpvInstruction b = c.Load(u32, Word(c.IAdd(u32, bytes, Const(1))));
+                     SpvInstruction d = c.Load(u32, Word(c.IAdd(u32, bytes, Const(2))));
+-                    c.Store(c.AccessChain(outIndices, indices, primitive), c.CompositeConstruct(uvec3, a, b, d));
++                    // An index past the vertex count is invalid and faults the GPU: the map words can hold anything the program did not write.
++                    SpvInstruction glsl = c.AddExtInstImport("GLSL.std.450");
++                    SpvInstruction top = Const(maxVertices - 1);
++                    c.Store(c.AccessChain(outIndices, indices, primitive), c.CompositeConstruct(uvec3, c.ExtInst(u32, glsl, 38, a, top), c.ExtInst(u32, glsl, 38, b, top), c.ExtInst(u32, glsl, 38, d, top)));
+                 });
+             }
+ 

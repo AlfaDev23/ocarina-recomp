@@ -1,0 +1,94 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Translator.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Translator.cs
+@@ -180,6 +180,7 @@
+                 }
+ 
+                 functions[index] = new(context.GetOperations());
++                IrTrace.Decoded(index, function);
+             }
+ 
+             return functions;
+--- a/src/Ryujinx.Graphics.Shader/Translation/TranslatorContext.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/TranslatorContext.cs
+@@ -327,6 +327,7 @@
+ 
+                 if (cfg.Blocks.Length != 0)
+                 {
++                    IrTrace.Blocks("before", i, cfg.Blocks);
+                     RegisterUsage.FixupCalls(cfg.Blocks, frus);
+ 
+                     Dominance.FindDominators(cfg);
+@@ -347,6 +348,7 @@
+ 
+                     Optimizer.RunPass(context);
+                     TransformPasses.RunPass(context);
++                    IrTrace.Blocks("after", i, cfg.Blocks);
+                 }
+ 
+                 funcs[i] = new Function(cfg.Blocks, $"fun{i}", false, inArgumentsCount, outArgumentsCount);
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Shader/Translation/IrTrace.cs
+@@ -0,0 +1,63 @@
++using Ryujinx.Graphics.Shader.Decoders;
++using Ryujinx.Graphics.Shader.IntermediateRepresentation;
++using System;
++using System.IO;
++using System.Linq;
++using System.Text;
++
++namespace Ryujinx.Graphics.Shader.Translation
++{
++    // TOTK_XLATE_IR=<dir>: each shader leaves its decoded blocks and its IR before and after optimization in a file.
++    static class IrTrace
++    {
++        private static readonly string _dir = Environment.GetEnvironmentVariable("TOTK_XLATE_IR");
++        [ThreadStatic] private static StringBuilder _text;
++
++        public static void Decoded(int index, DecodedFunction function)
++        {
++            if (_dir == null) return;
++            if (index == 0 && _text != null)
++            {
++                Directory.CreateDirectory(_dir);
++                File.WriteAllText(Path.Combine(_dir, Guid.NewGuid().ToString("N") + ".txt"), _text.ToString());
++                _text = null;
++            }
++            _text ??= new StringBuilder();
++            _text.AppendLine($"== decoded function {index} at {function.Address:x}");
++            foreach (Block b in function.Blocks)
++            {
++                _text.AppendLine($"block {b.Address:x}-{b.EndAddress:x} next [{string.Join(' ', b.Successors.Select(x => x.Address.ToString("x")))}]: {string.Join(' ', b.OpCodes.Select(o => o.Name.ToString()))}");
++            }
++        }
++
++        private static string Text(Operand o) => o == null ? "null" : o.Type switch
++        {
++            OperandType.Constant => $"#{o.Value:x}",
++            OperandType.Register => $"r{o.GetRegister().Index}{o.GetRegister().Type}",
++            OperandType.LocalVariable => o.AsgOp is Operation a ? $"l{(uint)o.GetHashCode() % 100000}<{a.Inst}>" : $"l{(uint)o.GetHashCode() % 100000}",
++            OperandType.Undefined => "undef",
++            _ => o.Type.ToString(),
++        };
++
++        public static void Blocks(string when, int index, BasicBlock[] blocks)
++        {
++            if (_dir == null) return;
++            _text ??= new StringBuilder();
++            _text.AppendLine($"== {when} function {index}: {blocks.Length} blocks");
++            foreach (BasicBlock b in blocks)
++            {
++                _text.AppendLine($"B{b.Index} next {b.Next?.Index} branch {b.Branch?.Index}");
++                foreach (INode n in b.Operations)
++                {
++                    if (n is Operation op)
++                    {
++                        string srcs = string.Join(", ", Enumerable.Range(0, op.SourcesCount).Select(i => Text(op.GetSource(i))));
++                        string dest = op.DestsCount == 0 ? "" : string.Join(",", Enumerable.Range(0, op.DestsCount).Select(i => Text(op.GetDest(i)))) + " = ";
++                        _text.AppendLine($"  {dest}{op.Inst} {op.StorageKind} {srcs}");
++                    }
++                    else _text.AppendLine("  phi");
++                }
++            }
++        }
++    }
++}

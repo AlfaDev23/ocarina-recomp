@@ -51,10 +51,28 @@ Lowered *lower(const uint8_t *control, const uint8_t *code) {
         const auto r = capture.Observe(insn, static_cast<uint32_t>(native.size() - 1));
         if (r != Shader::Ampere::ProgramCaptureState::Result::Continue) break;
     }
-    const auto lowered = Shader::Ampere::LowerToMaxwell(native, "full");
+    // LOCAL TEST (Ocarina): Lichii's lowering takes the stage, as its shader_environment.cpp passes it (SPH shader type: bits
+    // 10-13; 2, 3 tessellation, 4 geometry). Its old call with "full" turned into geometry_stage = true for every stage.
+    const uint32_t sph_type = gfx ? (w0 >> 10) & 15 : 0;
+    Shader::Ampere::LoweringOptions lower_options;
+    lower_options.geometry = sph_type == 4;
+    lower_options.tensor = false;   // true emits a pseudo instruction only Lichii's backend knows (green lines over movies here)
+    lower_options.native_code_address = reinterpret_cast<uint64_t>(code) + hdr;
+    // LOCAL TEST (Ocarina): a stage in a tessellation slot that writes the stage buffer is a mesh program after a task.
+    bool writes_stage_buffer = false;
+    for (const auto &insn : native) writes_stage_buffer |= insn.Bits(0, 12) == 0x927;
+    lower_options.tessellation_stage = writes_stage_buffer ? Shader::Ampere::TessellationStage::None
+                                     : sph_type == 2 ? Shader::Ampere::TessellationStage::Control
+                                     : sph_type == 3 ? Shader::Ampere::TessellationStage::Evaluation
+                                                     : Shader::Ampere::TessellationStage::None;
+    const auto lowered = Shader::Ampere::LowerToMaxwell(native, lower_options);
     if (!lowered) {
-        rt_log("nvn2: Ampere lowering failed at +%#x: %.*s", lowered.error_offset, (int)lowered.error.size(),
+        rt_log("nvn2: Ampere lowering failed for %016llx at +%#x: %.*s", (unsigned long long)gfx_shader_nvn2_hash(control, code), lowered.error_offset, (int)lowered.error.size(),
                lowered.error.data());
+        if (lowered.error_offset / 16 < native.size()) {   // LOCAL TEST (Ocarina): the instruction it stopped at
+            const auto &w = native[lowered.error_offset / 16].words;
+            rt_log("nvn2:   words %08x %08x %08x %08x (%zu instructions, gfx %d, w0 %#x)", w[0], w[1], w[2], w[3], native.size(), (int)gfx, w0);
+        }
         return nullptr;
     }
 
@@ -74,6 +92,10 @@ Lowered *lower(const uint8_t *control, const uint8_t *code) {
         // relabelled.
         if (((w0 >> 10) & 15) == 4) {
             const uint32_t relabelled = (w0 & ~uint32_t{0x3ff}) | 1u | 3u << 5;
+            std::memcpy(m.data() + 6, &relabelled, 4);
+        }
+        if (((w0 >> 10) & 15) == 3 && writes_stage_buffer) {   // LOCAL TEST (Ocarina): translated as a vertex stage
+            const uint32_t relabelled = (w0 & ~(uint32_t{15} << 10)) | 1u << 10;
             std::memcpy(m.data() + 6, &relabelled, 4);
         }
     }
@@ -124,6 +146,27 @@ Lowered *lower(const uint8_t *control, const uint8_t *code) {
     put32(out->control, 0x700, c1_off);
     put32(out->control, 0x704, len);
     put32(out->control, 0x714, stage);
+    // LOCAL TEST (Ocarina): a mesh program without a task sits in the vertex slot and writes the stage buffer. NVN 2 control
+    // +0x58 low half: threads; +0x60: max primitives, max vertices. A task program has +0x60 zero and is not handled yet.
+    uint32_t mesh_threads, mesh_sizes;
+    std::memcpy(&mesh_threads, control + 0x58, 4), std::memcpy(&mesh_sizes, control + 0x60, 4);
+    bool stage_writes = false;
+    for (const auto &insn : native) stage_writes |= insn.Bits(0, 12) == 0x927;
+    // Payload: control +0x58 bits 22-30, in lines of 32 words (Nemyu's SET_MESH_INIT_SHADER). Vertices low half of +0x60:
+    // 0x7e0040 is the usual 64 vertices, 126 primitives.
+    const uint32_t payload_lines = (mesh_threads >> 22) & 0x1ff;
+    const uint16_t payload_words = static_cast<uint16_t>((payload_lines ? payload_lines : 1) * 32);
+    if (gfx && type == 1 && stage_writes && !mesh_sizes) {
+        const uint16_t task[4] = {static_cast<uint16_t>(mesh_threads), 0, 0, payload_words};
+        std::memcpy(out->control.data() + kC0Layout, "DKT1", 4);
+        std::memcpy(out->control.data() + kC0Layout + 4, task, sizeof task);
+    }
+    if (gfx && (type == 1 || type == 3) && stage_writes && mesh_sizes) {
+        const uint16_t mesh[4] = {static_cast<uint16_t>(mesh_threads), static_cast<uint16_t>(mesh_sizes), static_cast<uint16_t>(mesh_sizes >> 16),
+                                  static_cast<uint16_t>(type == 3 ? payload_words : 0)};
+        std::memcpy(out->control.data() + kC0Layout, "DKM1", 4);
+        std::memcpy(out->control.data() + kC0Layout + 4, mesh, sizeof mesh);
+    }
     if (!gfx) {
         std::memcpy(out->control.data() + 0x748, control + 0x58, 12);   // local size (NVN 2 control +0x58)
         // The compute driver bank is packed per program from these counts (gfx_shader.c, "NVN 2 compute c0"):

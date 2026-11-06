@@ -33,7 +33,7 @@ typedef struct VkCtx {
     int has_custom_border_color, has_eds, has_eds2, has_eds3, has_vertex_input_dynamic_state,
         has_conditional_rendering, has_transform_feedback, has_provoking_vertex, has_device_fault, has_memory_budget,
         has_robustness2, has_buffer_device_address, has_fragment_shader_interlock, has_buffer_marker,
-        has_astc_ldr;                       // textureCompressionASTC_LDR (enabled when reported)
+        has_mesh_shader, has_astc_ldr;      // textureCompressionASTC_LDR (enabled when reported)
     // Feedback loops (maxwell.md 1.9, vk_exec_draw.c feedback_prepare): a draw samples a target of its open pass that
     // an earlier draw of the pass wrote. TOTK_FEEDBACK=0: VK_FEEDBACK_OFF (sampled in GENERAL without a barrier, the
     // old behaviour); VK_FEEDBACK_LAYOUT with VK_EXT_attachment_feedback_loop_layout and dynamicRenderingLocalRead
@@ -317,7 +317,7 @@ typedef struct {
     VkImageType type;
     VkImageViewType view_type;     // view of the whole image
     VkImageAspectFlags aspect;
-    VkImageUsageFlags usage;
+    VkImageUsageFlags usage;   // an sRGB image may carry storage usage its format lacks: see vk_srgb_store_format
     uint32_t width, height, depth, levels, layers, samples;
     uint64_t addr;                 // storage GPU address
     uint8_t alpha_one;             // X format: sample alpha as 1 through the view swizzle
@@ -336,6 +336,9 @@ const VkTexImage *vk_texture_get(const tex_t *t);   // created and made current;
 const VkTexImage *vk_texture_by_id(const dpool_ref *pool, int id, view_t *view, int *has_view);
 // The replay looks up many slots per draw: it takes the texture lock once around them (vk_texture_lock) and uses the
 // _locked lookups; vk_texture_slots_gen changes whenever a slot may resolve to another image or view.
+// LOCAL TEST (Ocarina): set 2 of every pipeline layout, the pools for samples through handles read from storage (vk_exec_draw.c).
+VkDescriptorSetLayout vk_bindless_layout(void);
+VkDescriptorSetLayout vk_bindless_empty(void);
 void vk_texture_lock(void);
 void vk_texture_unlock(void);
 const VkTexImage *vk_texture_by_id_locked(const dpool_ref *pool, int id, view_t *view, int *has_view);
@@ -460,6 +463,7 @@ typedef struct VkPipeState {
     uint32_t vattr[16];                    // OP_BIND_VATTR: va_st words; attribute i feeds vertex shader Location i
     vs_st vstream[16];                     // OP_BIND_VSTREAM
     // Keep the legacy fields above byte-for-byte stable for pipeline-key records.
+    const GfxShader *ts;                   // LOCAL TEST (Ocarina): a task stage before the mesh stage in vs
     const GfxShader *gs;                   // experimental ordinary GS; NULL keeps the existing VS/FS paths
     float alpha_ref;                       // OP_BIND_STATE kind 7: reference of color.alpha_func's test. After gs, so not in
                                            // the pipeline-key records: a prebuilt alpha-test pipeline has reference 0 and
@@ -516,6 +520,7 @@ int vk_pipeline_async_on(void);   // 1 after vk_pipeline_async_enable: graphics 
 // No-op without vk_pipeline_async_enable, with TOTK_PIPE_PREBUILD=0 or with TOTK_GPU=null.
 void vk_pipeline_prewarm(void);
 VkPipeline vk_pipeline_compute(const GfxShader *cs, const VkPipeInfo **info);
+int vk_pipeline_compute_ready(const GfxShader *cs);   // LOCAL TEST (Ocarina): 0 while a big compute shader builds in the background
 // Records every dynamic state that VkPipeState determines, after binding a graphics pipeline: cull mode, front face,
 // topology, depth and stencil tests and ops, depth bias enable, rasterizer discard, vertex input, and, where the GPU
 // has them dynamic, depth clamp, polygon mode, blend enables, equations, write masks and alpha to coverage. The replay
@@ -556,3 +561,14 @@ void vk_clear_stencil_masked(VkCommandBuffer cb, VkFormat format, uint32_t sampl
 void vk_clear_shutdown(VkDevice device);   // after device idle, before destroying the device
 
 #include "vk_rec.h"   // last: its macros route the vkCmd* calls of every file that includes vk.h
+
+// The format a shader writes an sRGB image through. Vulkan drivers have no sRGB storage images; NVN 2 games write these
+// images through an RGBA8 view (Ocarina's upscaler output), so the bytes they store are already encoded.
+static inline VkFormat vk_srgb_store_format(VkFormat f) {
+    switch (f) {
+    case VK_FORMAT_R8G8B8A8_SRGB: return VK_FORMAT_R8G8B8A8_UNORM;
+    case VK_FORMAT_B8G8R8A8_SRGB: return VK_FORMAT_B8G8R8A8_UNORM;
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32: return VK_FORMAT_A8B8G8R8_UNORM_PACK32;
+    default: return f;
+    }
+}

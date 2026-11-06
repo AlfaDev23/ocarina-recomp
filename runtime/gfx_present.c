@@ -614,6 +614,40 @@ static void present_image(VkImage src, VkImageLayout layout, VkFormat fmt, int w
                      VK_ACCESS_2_TRANSFER_WRITE_BIT);
     }
     // Colour adjustment (TOTK_COLOR_*, vk_color.c): an adjusted copy of the crop takes the game image's place below
+    {   // LOCAL TEST (Ocarina): OOT_FLASH_LOG=1 logs, per 96 presents, which ones have a white middle (the NaN flash)
+        static int on = -1;
+        static VkBuffer pbuf;
+        static VmaAllocation pmem;
+        static uint8_t *pmap;
+        static uint64_t pn;
+        if (on < 0) {
+            on = getenv("OOT_FLASH_LOG") != NULL;
+            VkBufferCreateInfo bi2 = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = 4 * 96, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+            VmaAllocationCreateInfo ai2 = {.usage = VMA_MEMORY_USAGE_AUTO, .flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT};
+            VmaAllocationInfo info2;
+            if (on && vmaCreateBuffer(c->vma, &bi2, &ai2, &pbuf, &pmem, &info2) == VK_SUCCESS) pmap = info2.pMappedData;
+            else on = 0;
+        }
+        if (on && general) {
+            uint32_t k = (uint32_t)(pn % 96);
+            if (k == 0 && pn >= 192) {
+                vmaInvalidateAllocation(c->vma, pmem, 0, VK_WHOLE_SIZE);
+                char line[97];
+                int white = 0;
+                for (int i = 0; i < 96; i++) {
+                    int w2 = pmap[4 * i] > 235 && pmap[4 * i + 1] > 235 && pmap[4 * i + 2] > 235;
+                    line[i] = w2 ? 'W' : '.';
+                    white += w2;
+                }
+                line[96] = 0;
+                rt_log("flash: present %llu: %s (%d white, sample %d %d %d)", (unsigned long long)pn, line, white, pmap[0], pmap[1], pmap[2]);
+            }
+            VkBufferImageCopy rg = {.bufferOffset = 4u * k, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                    .imageOffset = {cx + cw / 2, cy + ch / 3, 0}, .imageExtent = {1, 1, 1}};
+            vkCmdCopyImageToBuffer(cb, src, VK_IMAGE_LAYOUT_GENERAL, pbuf, 1, &rg);
+            pn++;
+        }
+    }
     VkImage graded = general ? vk_color_record(cb, slot, src, fmt, rect) : VK_NULL_HANDLE;
     const int grect[4] = {0, 0, cw, ch};
     VkImage psrc = graded ? graded : src;

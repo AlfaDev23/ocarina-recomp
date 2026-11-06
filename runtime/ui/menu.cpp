@@ -89,6 +89,12 @@ static void set_open(int open) { change_open(open); }
 
 static int g_failed_flag();
 extern "C" int menu_is_open(void) { return g_open.load(std::memory_order_relaxed); }
+extern "C" const char *ov_language(void);
+static std::atomic<int> g_miojo{0};
+extern "C" void menu_miojo(void) {
+    g_miojo = 1;
+    if (!menu_is_open()) menu_toggle();
+}
 extern "C" void menu_toggle(void) {
     if (!g_failed_flag()) change_open(-1);
 }
@@ -871,6 +877,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     snprintf(version, sizeof version, menu_text(UI_MENU_VERSION), rt_port_version, game);
     ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - ImGui::CalcTextSize(version).x);
     ImGui::TextDisabled("%s", version);
+    if (g_miojo) ImGui::TextColored(ImVec4(0.98f, 0.78f, 0.30f, 1), "%s", !strncmp(ov_language(), "pt", 2) ? "Miojo mandou um salve! 3 minutos de fogo, o resto foi recompilacao." : "Miojo says hi! 3 minutes on the stove, the rest was recompiling.");
 
     int step = g_modal || binds_modal()                                                                  ? 0
              : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1

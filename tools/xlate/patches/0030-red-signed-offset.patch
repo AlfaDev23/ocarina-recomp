@@ -1,0 +1,11 @@
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
+@@ -160,7 +160,7 @@
+         {
+             InstRed op = context.GetOp<InstRed>();
+ 
+-            (Operand addrLow, Operand addrHigh) = Get40BitsAddress(context, new Register(op.SrcA, RegisterType.Gpr), op.E, op.Imm20);
++            (Operand addrLow, Operand addrHigh) = Get40BitsAddress(context, new Register(op.SrcA, RegisterType.Gpr), op.E, (op.Imm20 << 12) >> 12);   // signed, as in Atom: Ocarina's culling writes group counts at -12
+ 
+             EmitAtomicOp(context, StorageKind.GlobalMemory, (AtomOp)op.RedOp, op.RedSize, addrLow, addrHigh, GetDest(op.SrcB));
+         }

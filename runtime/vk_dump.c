@@ -356,6 +356,8 @@ static const char *copy_out(VkExec *ex, VkImage image, VkFormat vf, VkImageAspec
 // `stride` bytes at `off` (each record a letter: its value's index in the table under the map).
 
 static uint64_t bd_addr, bd_size, bd_off, bd_stride;
+// LOCAL TEST (Ocarina): TOTK_DUMP_BUF=0:<size> follows the first indirect dispatch of the dump frame
+void vk_dump_buf_follow(uint64_t addr) { if (!bd_addr) { bd_addr = addr; rt_log("vk_dump: following %#llx", (unsigned long long)addr); } }
 static uint32_t bd_w, bd_h;
 static uint8_t *bd_prev;
 static FILE *bufs_f;
@@ -418,7 +420,8 @@ static void buf_done(void *arg) {
 }
 
 static void buf_snap(VkExec *ex, int pass) {
-    if (!bd_size) return;
+    if (!bd_size) return; 
+    if (!bd_addr) { const char *f = getenv("OOT_BUF_NOW"); if (f) bd_addr = strtoull(f, NULL, 0); }
     VkMemSpan s;
     if (!vk_mem_resolve(bd_addr, bd_size, &s) || s.avail < bd_size) return;
     VK_MEM_PICK(s);   // the GPU's view of the buffer
@@ -586,7 +589,7 @@ static void describe_bindings(Str *b, const VkExec *ex, const VkPipeInfo *info) 
             if (u->addr && vk_mem_resolve(u->addr, 1, &ms)) {
                 uint64_t n = u->size && u->size < ms.avail ? u->size : ms.avail;
                 const float *f = (const float *)(uintptr_t)u->addr;
-                for (uint64_t k = 0; k < 16 && (k + 1) * 16 <= n; k++)
+                for (uint64_t k = 0; k < 400 && (k + 1) * 16 <= n; k++)
                     sp(b, "%s[%llu] %g %g %g %g", k % 4 ? " " : "\n      ", (unsigned long long)k, f[4 * k], f[4 * k + 1],
                        f[4 * k + 2], f[4 * k + 3]);
             } else {
@@ -919,6 +922,17 @@ void vk_dump_init(void) {
 }
 
 void vk_dump_present(uint64_t frame) {
+    if (frame % 30 == 0 && !finished && frame + 2 < dump_frame) {   // LOCAL TEST (Ocarina): <dump dir>/dump-now dumps a frame soon
+        char path[600];
+        snprintf(path, sizeof path, "%s/dump-now", dir);
+        FILE *f = fopen(path, "r");
+        if (f) {
+            fclose(f);
+            remove(path);
+            dump_frame = frame + 2;
+            rt_log("vk_dump: dump-now: frame %llu", (unsigned long long)dump_frame);
+        }
+    }
     if (frame != dump_frame) return;
     plat_mutex_lock(&rec_lock);
     finished = 1;

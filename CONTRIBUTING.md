@@ -1,49 +1,135 @@
-# Contributing
+# Como contribuir com o Ocarina Recomp
 
-## Where to start
+[Read in English](CONTRIBUTING.en.md)
 
-- [Roadmap to playable](https://github.com/Lucas-blip-png/dkb-pc-recomp/issues/10) lists what is done and what is open.
-- Issues labelled [good first issue](https://github.com/Lucas-blip-png/dkb-pc-recomp/issues?q=is%3Aopen+label%3A%22good+first+issue%22) need no code: testing on your GPU and playing further.
-- Issues labelled [help wanted](https://github.com/Lucas-blip-png/dkb-pc-recomp/issues?q=is%3Aopen+label%3A%22help+wanted%22) each name the files to start from.
-- Say in the issue that you are working on it, before you start, so two people do not do the same job. A maintainer then assigns it to you and adds the `in progress` label. Issues that already carry that label are taken: ask in the issue first. The top of the [roadmap](https://github.com/Lucas-blip-png/dkb-pc-recomp/issues/10) lists what is being worked on now.
-- Questions go to [Discussions](https://github.com/Lucas-blip-png/dkb-pc-recomp/discussions).
-- [docs/architecture.md](docs/architecture.md) explains how the pieces fit, [docs/bananza-plan.md](docs/bananza-plan.md) has the plan and [docs/bananza-shaders.md](docs/bananza-shaders.md) the shader work.
+Toda ajuda conta, inclusive sem saber programar. Este guia explica como testar, como compilar, como investigar um bug gráfico e como enviar sua contribuição.
 
-## The one hard rule
+## A regra mais importante
 
-Nothing that came out of the game goes into the repository: no game files, keys, extracted data, recompiled C, compiled binaries, shaders, shader caches, fonts, audio or movies. Not in commits, not in issues, not in pull requests. Only information about the game goes in: addresses, hashes, patch code we wrote, shader and bind-state identifiers.
+**Nada que venha do jogo entra neste repositório.** Isso inclui:
 
-Two checks enforce this:
+- o jogo, keys, `exefs`, `romfs` e o `.nup`;
+- o `ocarina.exe`, o código em `generated/` e tudo em `build/`;
+- saves, cache de shaders, SPIR-V dos shaders do jogo, dumps de frame e prints.
 
-- CI runs `tools/check_content.py` on every push and pull request.
-- The same check runs before each local commit once you enable the hook:
+Hashes, endereços (`main+0x6e6dc4`) e a descrição do que o código faz podem entrar.
 
-  ```sh
-  git config core.hooksPath .githooks
-  ```
+O `tools/check_content.py` confere isso em todo push. Ative a verificação local uma vez por clone:
 
-A failing check is never bypassed with `--no-verify`. If it flags a file by mistake, change the check in a separate pull request and say why.
+```powershell
+git config core.hooksPath .githooks
+```
 
-Links to game files, keys or firmware in issues or pull requests get the issue closed and the content removed.
+Nunca use `--no-verify`. E não peça nem compartilhe o jogo em issues ou pull requests.
 
-## Code from other projects
+## Sem programar: testar
 
-The rules are in [AGENTS.md](AGENTS.md), "Reusing code". In short: DKB Recomp is GPL-3.0-or-later as a whole, so code under MIT, BSD, ISC, zlib, Apache-2.0 and GPL-3.0-compatible licences (Eden, Eglantine, yuzu and the like) may be copied. Each copy keeps its original header and gets a row in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) with the upstream commit. Files that came from TotK Recomp keep their MIT terms, and a fix meant for TotK Recomp itself must not use GPL code. Unicorn is used only as a separate test tool.
+Instale pelo [README](README.md), jogue e abra uma [issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) contando:
 
-## Reporting bugs
+- placa de vídeo, versão do driver, processador e quantidade de RAM;
+- onde no jogo aconteceu e como repetir;
+- o que você esperava ver e o que apareceu;
+- o `ultima-partida-erros.log` da pasta de instalação.
 
-Use the issue form. Include the commit you built (`git rev-parse --short HEAD`), your GPU, driver and Windows version, the log (`logs\totk.log` next to `dkb.exe`; after a crash, copy it before you start the game again), and the steps to reproduce. Describe what you see instead of attaching screenshots of the game. [docs/dkb-testing.md](docs/dkb-testing.md) covers building, running and the useful settings.
+**O mais útil agora:** testes em placas AMD e Intel, em PCs mais fracos e em áreas além do vilarejo Kokiri.
 
-## Pull requests
+## Preparar o ambiente
 
-- One topic per pull request.
-- Describe the problem, then what changed.
-- Say how you tested it: which commit, which scene, how long, which GPU.
-- A change to the lifter (`recomp/`) or the CPU headers passes the differential tests in [docs/building.md](docs/building.md), "Checks".
-- Commit messages are plain sentences, without `feat:` or other prefixes.
-- AI-assisted code is welcome. You are responsible for having read and run it.
+O jeito mais fácil é rodar o instalador uma vez: ele deixa as ferramentas, o `.venv` e o `build/` prontos em `C:\OcarinaRecomp`. Depois, faça seu fork e aponte o `origin` para ele:
 
-## Code and docs
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/SEU-USUARIO/ocarina-recomp
+```
 
-- Code, comments, commit messages and documentation are in English.
-- Generated code is never edited by hand: change the generator.
+Para recompilar, use um terminal com `C:\msys64\ucrt64\bin` no `PATH`:
+
+```bash
+# O runtime mudou: é incremental e leva pouco tempo
+.venv/Scripts/python tools/build_game.py --version oot111 --gen generated/oot111 --out build/oot111 \
+  --expected tools/data/expected-oot111.json --exefs build/exefs --romfs build/romfs
+
+# O tradutor de shaders mudou: rode isto e depois o comando acima
+.venv/Scripts/python tools/build_xlate.py
+
+# O lifter (recomp/) mudou: gere de novo e depois rode o primeiro comando
+.venv/Scripts/python recomp/gen.py --exefs build/exefs --out generated/oot111 --modules main,sdk,subsdk0
+.venv/Scripts/python tools/oot/patch_generated.py generated/oot111
+```
+
+Para abrir o jogo com as mesmas configurações do atalho, use `instalador\jogar-ocarina.ps1`.
+
+## Onde fica cada coisa
+
+| Pasta | Conteúdo |
+|---|---|
+| `recomp/` | Tradutor de ARM64 para C |
+| `runtime/` | O "console": kernel, sistema, áudio, entrada e NVN sobre Vulkan |
+| `runtime/vk_exec_draw.c` | Execução de draws e dispatches, inclusive mesh |
+| `runtime/vk_pipeline.c` | Criação de pipelines |
+| `runtime/ov_*.c` | Substituições de funções do SDK (`HOST_OVERRIDE`) |
+| `runtime/third_party/eglantine/.../ampere/` | Rebaixamento de shaders Ampere para Maxwell |
+| `tools/xlate/patches/` | Patches do tradutor de shaders. A quantidade esperada está em `tools/build_xlate.py` |
+| `tools/oot/` | Partes específicas do Ocarina |
+| `instalador/` | O instalador e o lançador |
+
+Os prefixos `TOTK_` e `DKB_` nos nomes vêm dos projetos de origem. Eles continuam assim para o código seguir fácil de comparar com esses projetos. Comentários que citam outros jogos registram onde o comportamento foi descoberto.
+
+## Regras do código
+
+- **Não edite o código gerado à mão.** Ele é recriado. Use `recomp/patches.py` ou, se não couber, `tools/oot/patch_generated.py`.
+- **Marcador `LOCAL TEST`:** mudanças feitas durante a investigação que ainda não têm forma definitiva. Ao melhorar um trecho desses, tire o marcador.
+- **Patch do tradutor:** gere com um diff sobre `build/xlate/ryujinx` e atualize a contagem em `tools/build_xlate.py`. Mudar o tradutor recompila todos os shaders na próxima execução.
+- **Windows:** `long` tem 32 bits. Foi um `1L << 40` que descartou todos os draws indiretos de mesh por dias.
+- **Código copiado:** mantenha o cabeçalho e adicione uma linha em `THIRD_PARTY_NOTICES.md`, com o commit de origem.
+- **Commits:** use a sua própria identidade do git. Nunca envie direto para `main`: abra um pull request.
+
+## Como investigar um bug gráfico
+
+O que resolveu os bugs maiores até agora foi **medir e comparar com uma referência**, sem apostar em palpite.
+
+1. **Crie um cenário repetível.** Use um script de entrada (`TOTK_INPUT_SCRIPT`) com `TOTK_INPUT=none`, porque senão o seu teclado mexe no Link enquanto a janela de teste está em foco:
+   ```text
+   700 A 8
+   2300 RSTICK 20000 0 150
+   2600 LSTICK 0 32000 240
+   ```
+2. **Capture.** `ocarina.exe --seconds 120 --shot saida.png`. Com `TOTK_SHOTS=lo-hi:passo`, ele salva miniaturas ao longo do caminho.
+3. **Isole.** Desligue um programa de cada vez até o defeito sumir, por exemplo com `OOT_MESH_DENY=4049,4047`.
+4. **Compare com o Lichii.** Com `EDEN_NX2_RENDER_TRACE=1`, ele registra os draws, e dá para comparar com os nossos.
+5. **Leia o shader.** Use `TOTK_DUMP=<frame>` e `TOTK_DUMP_DIR=<pasta>`, descompile com `spirv-cross` e compare com o código nativo. Um valor absurdo costuma apontar a causa: foi assim que achamos a colisão de bancos de registradores.
+
+### Ferramentas de diagnóstico
+
+| Variável | O que faz |
+|---|---|
+| `OOT_DRAW_ARGS=<frame>` | Registra tipos de draw, argumentos, buffers por estágio e estatísticas por programa |
+| `OOT_MESH_DENY=<a,b,...>` | Descarta draws indiretos de mesh desses programas |
+| `OOT_NO_CULL=1`, `OOT_NO_CULL_PROGS=lo-hi` | Desliga o descarte de faces |
+| `OOT_FOLLOW_DISP=<frame>:<k>:<c0>` | Segue um dispatch, junto com `TOTK_DUMP_BUF=0:<tamanho>` |
+| `TOTK_XLATE_IR=<pasta>` | O tradutor grava os blocos e o IR de cada shader com subrotina |
+| `TOTK_SPV_OVERRIDE=<pasta>` | Troca shaders por arquivos `sh_<hash>.spv`. O hash muda quando o tradutor muda, e o arquivo antigo para de valer sem aviso |
+| `OOT_BIG_CS_WORDS`, `OOT_BIG_CS_OPT=1` | Controlam a compilação em segundo plano dos compute shaders grandes |
+| `TOTK_TRACE=perf` | Registra o tráfego de memória por frame. Comece por aqui quando o fps estiver baixo |
+
+**Ao ler buffers da GPU:** leia depois do `VK_MEM_USE`. Antes dele, você vê uma cópia antiga da CPU.
+
+## Bons pontos para começar
+
+- Por que a segunda passada por uma área ainda monta pipelines novos.
+- Testar e corrigir em AMD e Intel.
+- Conferir a porta da casa do Link, quebrar vasos e tocar a ocarina.
+- Conferir o fog em Hyrule Field.
+- Conferir o filme de abertura de New Game.
+- Avaliar os PRs #224, #353, #337, #215 e #345 do Lichii.
+- Trocar a lista de candidatos de ponteiros pela tabela bruta de pools do nxnative (`TryGenerateRawStorageOp`), o que reduziria os compute shaders gigantes.
+
+## Enviar um pull request
+
+1. Crie um branch a partir de `main`.
+2. Faça uma mudança por pull request.
+3. Rode `python tools/check_content.py`. Se mexeu no lifter, rode também os testes em `tests/`.
+4. Teste no jogo. Diga no pull request qual placa e driver usou, em que cena e o que mudou. Se puder medir, melhor ainda: "fps de X para Y", ou "programa Z passou de 0 para N triângulos".
+5. Diga o que você **não** testou. Um "não testei em AMD" evita muita surpresa.
+
+Ao usar IA para ajudar, revise o resultado e confirme que funciona antes de enviar. Veja também o [código de conduta](CODE_OF_CONDUCT.md).

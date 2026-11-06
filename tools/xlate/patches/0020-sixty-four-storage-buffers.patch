@@ -1,0 +1,17 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/ResourceManager.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/ResourceManager.cs
+@@ -24,3 +24,3 @@
+         private readonly SetBindingPair[] _sbSlotToBindingMap;
+-        private uint _sbSlotWritten;
++        private System.UInt128 _sbSlotWritten;
+ 
+@@ -181,3 +181,3 @@
+             {
+-                _sbSlotWritten |= 1u << slot;
++                _sbSlotWritten |= System.UInt128.One << slot;
+             }
+@@ -491,3 +491,3 @@
+                     (int sbCbSlot, int sbCbOffset) = UnpackSbCbInfo(key);
+-                    BufferUsageFlags flags = (_sbSlotWritten & (1u << slot)) != 0 ? BufferUsageFlags.Write : BufferUsageFlags.None;
++                    BufferUsageFlags flags = (_sbSlotWritten & (System.UInt128.One << slot)) != 0 ? BufferUsageFlags.Write : BufferUsageFlags.None;
+                     if ((key & (1 << 24)) != 0)

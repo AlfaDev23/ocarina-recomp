@@ -159,9 +159,10 @@ static class SwshXlate
         public SetBindingPair CreateStorageBufferBinding(int index) => new(0, _binding++);
         public SetBindingPair CreateTextureBinding(int count, bool isBuffer) { int b = _binding; _binding += count; return new(0, b); }
         public ReadOnlySpan<ulong> GetCode(ulong address, int minimumSize) => MemoryMarshal.Cast<byte, ulong>(new ReadOnlySpan<byte>(_code)[(int)address..]);
-        public int QuerySamplerArrayLengthFromPool() => 32;
+        public int QuerySamplerArrayLengthFromPool() => 4096;
         public int QueryTextureArrayLengthFromBuffer(int slot) => 32;
-        public int QueryTextureArrayLengthFromPool() => 32;
+        public int QueryTextureArrayLengthFromPool() => 32768;
+        public bool QueryHostSupportsShaderNonUniformIndexing() => true;
 
         string Get(string table, int slot) => _job[table] is JsonObject t && t[slot.ToString()] is JsonNode n ? (n is JsonObject o ? (string)o["type"] : (string)n) : null;
         int TexSlot(int handle, int cbufSlot)
@@ -249,7 +250,7 @@ static class SwshXlate
         // "subgroup": n: lanes per subgroup when the host cannot pin 32 (AMD GCN/Vega run 64): ballots and votes span n lanes.
         public int QueryHostSubgroupSize() => _job["subgroup"] is JsonNode n ? (int)n : 32;
         // The translator's own warnings (a global access with no storage buffer found, ...), with DMSH_STACK set.
-        public void Log(string message) { if (Environment.GetEnvironmentVariable("DMSH_STACK") != null) Console.Error.WriteLine(message); }
+        public void Log(string message) { Notes.Add(message); if (Environment.GetEnvironmentVariable("DMSH_STACK") != null) Console.Error.WriteLine(message); }
     }
 
 
@@ -259,6 +260,32 @@ static class SwshXlate
             try
             {
                 byte[] code = File.ReadAllBytes((string)job["code"]);
+                NxMesh.Threads = 0;
+                NxMesh.IsTask = false;
+                NxMesh.PayloadWords = 0;
+                if (job["task"] is JsonArray taskJob)
+                {
+                    NxMesh.Threads = (int)taskJob[0];
+                    NxMesh.IsTask = true;
+                    NxMesh.PayloadWords = (int)taskJob[1];
+                    NxMesh.Lines = [];
+                }
+                if (job["mesh"] is JsonArray meshJob)
+                {
+                    // [threads, max vertices, max primitives]; output lines from the SPH: system bits at byte 0x35, then
+                    // one nibble per generic from byte 0x36.
+                    var meshLines = new List<int>();
+                    for (int bit = 0; bit < 8; bit++)
+                        if ((code[0x35] >> bit & 1) != 0) meshLines.Add(-1 - bit);
+                    for (int generic = 0; generic < 32; generic++)
+                        for (int element = 0; element < 4; element++)
+                            if ((code[0x36 + generic / 2] >> (generic % 2 * 4 + element) & 1) != 0) meshLines.Add(generic * 4 + element);
+                    NxMesh.Threads = (int)meshJob[0];
+                    NxMesh.MaxVertices = (int)meshJob[1];
+                    NxMesh.MaxPrimitives = (int)meshJob[2];
+                    NxMesh.Lines = meshLines.ToArray();
+                    NxMesh.PayloadWords = (int)meshJob[3];
+                }
                 var acc = new Accessor(code, job);
                 // 作业 debug = false：关 DebugMode（DebugMode 会跳过 AST 优化器，产物满是临时变量；不改语义）
                 // Job debug = false: turn off DebugMode (DebugMode skips the AST optimizer and the output is full of temporaries; semantics unchanged)
@@ -297,7 +324,7 @@ static class SwshXlate
                 foreach (var b in p.Info.CBuffers) res["cbufs"].AsArray().Add((JsonNode)new JsonObject { ["binding"] = b.Binding, ["slot"] = b.Slot });
                 foreach (var b in p.Info.SBuffers) res["sbufs"].AsArray().Add((JsonNode)new JsonObject { ["binding"] = b.Binding, ["slot"] = b.Slot, ["cb_slot"] = b.SbCbSlot, ["cb_offset"] = b.SbCbOffset, ["flags"] = (int)b.Flags });
                 foreach (var (list, name) in new[] { (p.Info.Textures, "textures"), (p.Info.Images, "images") })
-                    foreach (var t in list) res[name].AsArray().Add((JsonNode)new JsonObject { ["binding"] = t.Binding, ["type"] = (int)t.Type, ["format"] = t.Format.ToString(), ["cbuf_slot"] = t.CbufSlot, ["handle"] = t.HandleIndex, ["array"] = t.ArrayLength, ["separate"] = t.Separate, ["flags"] = (int)t.Flags });
+                    foreach (var t in list.Where(x => x.Set != 2)) res[name].AsArray().Add((JsonNode)new JsonObject { ["binding"] = t.Binding, ["type"] = (int)t.Type, ["format"] = t.Format.ToString(), ["cbuf_slot"] = t.CbufSlot, ["handle"] = t.HandleIndex, ["array"] = t.ArrayLength, ["separate"] = t.Separate, ["flags"] = (int)t.Flags });
                 if (job["c0"] is JsonNode c0) {
                     res["c0"] = c0.DeepClone();
                     res["c0_version"] = 2;

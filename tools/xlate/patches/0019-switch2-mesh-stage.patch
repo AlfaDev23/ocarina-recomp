@@ -1,0 +1,551 @@
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/SpirvGenerator.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/SpirvGenerator.cs
+@@ -45,6 +45,13 @@
+ 
+             context.AddCapability(Capability.Shader);
+ 
++            if (NxMesh.Active)
++            {
++                context.SetVersion(0x00010400);   // SPV_EXT_mesh_shader needs SPIR-V 1.4
++                context.AddCapability((Capability)5283);
++                context.AddExtension("SPV_EXT_mesh_shader");
++            }
++
+             context.SetMemoryModel(AddressingModel.Logical, MemoryModel.GLSL450);
+ 
+             context.AddCapability(Capability.GroupNonUniformBallot);
+@@ -158,6 +165,209 @@
+             return result;
+         }
+ 
++        // The MeshEXT entry point: zeroes the primitive count, runs the program in every invocation, and hands the workgroup
++        // memory to Vulkan. As with the hardware's stage buffer, each invocation copies the slots its index selects.
++        private static void GenerateMeshEntry(CodeGenContext c, SpvInstruction main)
++        {
++            SpvInstruction u32 = c.TypeU32(), f32 = c.TypeFP32(), vec4 = c.TypeVector(f32, 4), uvec3 = c.TypeVector(u32, 3);
++            SpvInstruction boolean = c.TypeBool();
++            SpvInstruction Const(int value) => c.Constant(u32, (uint)value);
++
++            int maxVertices = NxMesh.MaxVertices, maxPrimitives = NxMesh.MaxPrimitives, threads = NxMesh.Threads;
++            int[] lines = NxMesh.Lines;
++
++            SpvInstruction shared = System.Linq.Enumerable.First(c.SharedMemories.Values);
++            SpvInstruction sharedWord = c.TypePointer(StorageClass.Workgroup, u32);
++
++            // The task payload (TaskPayloadWorkgroupEXT): the program sees it through the shared array, each invocation copies
++            // its share. ponytail: copies the whole declared payload; a smaller copy needs the highest word written.
++            const StorageClass PayloadClass = (StorageClass)5402;
++            SpvInstruction payload = null;
++            SpvInstruction payloadWord = NxMesh.PayloadWords != 0 ? c.TypePointer(PayloadClass, u32) : null;
++            if (NxMesh.PayloadWords != 0)
++            {
++                payload = c.Variable(c.TypePointer(PayloadClass, c.TypeArray(u32, Const(NxMesh.PayloadWords))), PayloadClass);
++                c.AddGlobalVariable(payload);
++            }
++
++            if (NxMesh.IsTask)
++            {
++                SpvInstruction taskLocal = c.Variable(c.TypePointer(StorageClass.Input, uvec3), StorageClass.Input);
++                c.AddGlobalVariable(taskLocal);
++                c.Decorate(taskLocal, Decoration.BuiltIn, (SpvLiteralInteger)(int)BuiltIn.LocalInvocationId);
++                SpvInstruction taskVoid = c.TypeVoid();
++                SpvInstruction taskEntry = c.Function(taskVoid, FunctionControlMask.MaskNone, c.TypeFunction(taskVoid, false));
++                c.AddFunction(taskEntry);
++                c.AddLabel(c.Label());
++                c.FunctionCall(taskVoid, main);
++                c.ControlBarrier(Const(2), Const(2), Const(0x108));
++                SpvInstruction taskInvocation = c.CompositeExtract(u32, c.Load(uvec3, taskLocal), 0);
++                for (int first = 0; first < NxMesh.PayloadWords; first += threads)
++                {
++                    SpvInstruction index = c.IAdd(u32, taskInvocation, Const(first));
++                    c.Store(c.AccessChain(payloadWord, payload, index), c.Load(u32, c.AccessChain(sharedWord, shared, index)));
++                }
++                c.ControlBarrier(Const(2), Const(2), Const(0x108));
++                SpvInstruction meshes = c.Load(u32, c.AccessChain(sharedWord, shared, Const(1)));
++                c.AddEmitMeshTasks(meshes, Const(1), Const(1), payload);
++                c.FunctionEnd();
++                c.AddEntryPoint((ExecutionModel)5364, taskEntry, "main", c.GlobalVariables.ToArray());   // TaskEXT
++                c.AddExecutionMode(taskEntry, ExecutionMode.LocalSize, (SpvLiteralInteger)threads, (SpvLiteralInteger)1, (SpvLiteralInteger)1);
++                return;
++            }
++            SpvInstruction outF32 = c.TypePointer(StorageClass.Output, f32);
++
++            SpvInstruction Output(SpvInstruction type, int count)
++            {
++                SpvInstruction variable = c.Variable(c.TypePointer(StorageClass.Output, c.TypeArray(type, Const(count))), StorageClass.Output);
++                c.AddGlobalVariable(variable);
++                return variable;
++            }
++
++            SpvInstruction position = Output(vec4, maxVertices);
++            c.Decorate(position, Decoration.BuiltIn, (SpvLiteralInteger)(int)BuiltIn.Position);
++            SpvInstruction indices = Output(uvec3, maxPrimitives);
++            c.Decorate(indices, Decoration.BuiltIn, (SpvLiteralInteger)5296);   // PrimitiveTriangleIndicesEXT
++
++            System.Collections.Generic.Dictionary<int, SpvInstruction> generics = [];
++            SpvInstruction[] target = new SpvInstruction[lines.Length];
++            int[] element = new int[lines.Length];
++            for (int i = 0; i < lines.Length; i++)
++            {
++                if (lines[i] >= 0)
++                {
++                    int generic = lines[i] / 4;
++                    if (!generics.TryGetValue(generic, out SpvInstruction variable))
++                    {
++                        variable = Output(vec4, maxVertices);
++                        c.Decorate(variable, Decoration.Location, (SpvLiteralInteger)generic);
++                        generics.Add(generic, variable);
++                    }
++                    target[i] = variable;
++                    element[i] = lines[i] % 4;
++                }
++                else if (lines[i] <= -5)
++                {
++                    target[i] = position;     // system bits 4-7
++                    element[i] = -lines[i] - 5;
++                }
++            }
++
++            SpvInstruction local = c.Variable(c.TypePointer(StorageClass.Input, uvec3), StorageClass.Input);
++            c.AddGlobalVariable(local);
++            c.Decorate(local, Decoration.BuiltIn, (SpvLiteralInteger)(int)BuiltIn.LocalInvocationId);
++
++            SpvInstruction voidType = c.TypeVoid();
++            SpvInstruction entry = c.Function(voidType, FunctionControlMask.MaskNone, c.TypeFunction(voidType, false));
++            c.AddFunction(entry);
++            c.AddLabel(c.Label());
++
++            void Barrier() => c.ControlBarrier(Const(2), Const(2), Const(0x108));   // workgroup, acquire-release of its memory
++            SpvInstruction Word(SpvInstruction index) => c.AccessChain(sharedWord, shared, index);
++            void If(SpvInstruction condition, System.Action body)
++            {
++                SpvInstruction then = c.Label(), merge = c.Label();
++                c.SelectionMerge(merge, SelectionControlMask.MaskNone);
++                c.BranchConditional(condition, then, merge);
++                c.AddLabel(then);
++                body();
++                c.Branch(merge);
++                c.AddLabel(merge);
++            }
++
++            int countWord = NxMesh.AttributeWords + NxMesh.MapWords;
++            c.Store(Word(Const(countWord)), Const(0));
++            if (NxMesh.PayloadWords != 0)
++            {
++                SpvInstruction meshInvocation = c.CompositeExtract(u32, c.Load(uvec3, local), 0);
++                for (int first = 0; first < NxMesh.PayloadWords; first += threads)
++                {
++                    SpvInstruction index = c.IAdd(u32, meshInvocation, Const(first));
++                    c.Store(Word(c.IAdd(u32, index, Const(NxMesh.PayloadBase))), c.Load(u32, c.AccessChain(payloadWord, payload, index)));
++                }
++            }
++            Barrier();
++            c.FunctionCall(voidType, main);
++            Barrier();
++
++            SpvInstruction count = c.Load(u32, Word(Const(countWord)));
++            SpvInstruction limited = c.ExtInst(u32, c.AddExtInstImport("GLSL.std.450"), 38, count, Const(maxPrimitives));   // UMin
++            c.AddMeshOutputs(Const(maxVertices), limited);
++
++            SpvInstruction invocation = c.CompositeExtract(u32, c.Load(uvec3, local), 0);
++
++            for (int first = 0; first < maxVertices; first += threads)
++            {
++                SpvInstruction vertex = c.IAdd(u32, invocation, Const(first));
++
++                void Copy()
++                {
++                    // Word of line 0: (index / 32) * lines * 32 + index % 32, then 32 words per line.
++                    SpvInstruction group = c.ShiftRightLogical(u32, vertex, Const(5));
++                    SpvInstruction slot = c.BitwiseAnd(u32, vertex, Const(31));
++                    SpvInstruction start = c.IAdd(u32, c.IMul(u32, group, Const(lines.Length * 32)), slot);
++
++                    // Components no line writes start as a vertex stage would (patch 0006): 0, 0, 0, 1; the fragment stage
++                    // can read every component of a location, and a w of 0 turns into NaN after the division.
++                    foreach ((int generic, SpvInstruction output) in generics)
++                    {
++                        for (int component = 0; component < 4; component++)
++                        {
++                            if (System.Array.IndexOf(lines, generic * 4 + component) < 0)
++                            {
++                                c.Store(c.AccessChain(outF32, output, vertex, Const(component)), c.Constant(f32, component == 3 ? 1f : 0f));
++                            }
++                        }
++                    }
++
++                    for (int line = 0; line < lines.Length; line++)
++                    {
++                        if (target[line] == null)
++                        {
++                            continue;
++                        }
++
++                        SpvInstruction word = c.Load(u32, Word(c.IAdd(u32, start, Const(line * 32))));
++                        c.Store(c.AccessChain(outF32, target[line], vertex, Const(element[line])), c.Bitcast(f32, word));
++                    }
++                }
++
++                if (first + threads > maxVertices)
++                {
++                    If(c.ULessThan(boolean, vertex, Const(maxVertices)), Copy);
++                }
++                else
++                {
++                    Copy();
++                }
++            }
++
++            SpvInstruction outIndices = c.TypePointer(StorageClass.Output, uvec3);
++            for (int first = 0; first < maxPrimitives; first += threads)
++            {
++                SpvInstruction primitive = c.IAdd(u32, invocation, Const(first));
++
++                If(c.ULessThan(boolean, primitive, limited), () =>
++                {
++                    // Vertex indices: map bytes 4 + 3 * primitive.
++                    SpvInstruction bytes = c.IAdd(u32, c.IMul(u32, primitive, Const(3)), Const(4 + NxMesh.AttributeWords));
++                    SpvInstruction a = c.Load(u32, Word(bytes));
++                    SpvInstruction b = c.Load(u32, Word(c.IAdd(u32, bytes, Const(1))));
++                    SpvInstruction d = c.Load(u32, Word(c.IAdd(u32, bytes, Const(2))));
++                    c.Store(c.AccessChain(outIndices, indices, primitive), c.CompositeConstruct(uvec3, a, b, d));
++                });
++            }
++
++            c.Return();
++            c.FunctionEnd();
++
++            c.AddEntryPoint((ExecutionModel)5365, entry, "main", c.GlobalVariables.ToArray());   // MeshEXT: SPIR-V 1.4 lists every global
++            c.AddExecutionMode(entry, ExecutionMode.LocalSize, (SpvLiteralInteger)threads, (SpvLiteralInteger)1, (SpvLiteralInteger)1);
++            c.AddExecutionMode(entry, ExecutionMode.OutputVertices, (SpvLiteralInteger)maxVertices);
++            c.AddExecutionMode(entry, (ExecutionMode)5270, (SpvLiteralInteger)maxPrimitives);   // OutputPrimitivesEXT
++            c.AddExecutionMode(entry, (ExecutionMode)5298);                                     // OutputTrianglesEXT
++        }
++
+         private static void Generate(CodeGenContext context, StructuredProgramInfo info, int funcIndex)
+         {
+             (StructuredFunction function, SpvInstruction spvFunc) = context.GetFunction(funcIndex);
+@@ -185,6 +336,12 @@
+ 
+             if (funcIndex == 0)
+             {
++                if (NxMesh.Active)
++                {
++                    GenerateMeshEntry(context, spvFunc);
++                    return;
++                }
++
+                 context.AddEntryPoint(context.Definitions.Stage.Convert(), spvFunc, "main", context.GetMainInterface());
+ 
+                 if (context.Definitions.Stage == ShaderStage.TessellationControl)
+--- a/src/Ryujinx.Graphics.Shader/Decoders/InstName.cs
++++ b/src/Ryujinx.Graphics.Shader/Decoders/InstName.cs
+@@ -75,6 +75,7 @@
+         Imul32i,
+         Ipa,
+         Isberd,
++        NxIsbe,
+         Iscadd,
+         Iscadd32i,
+         Iset,
+--- a/src/Ryujinx.Graphics.Shader/Decoders/InstTable.cs
++++ b/src/Ryujinx.Graphics.Shader/Decoders/InstTable.cs
+@@ -179,6 +179,7 @@
+             Add("0100110000111xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Imul,        InstEmit.ImulC,       InstProps.Rd  | InstProps.Ra);
+             Add("00011111xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Imul32i,     InstEmit.Imul32i,     InstProps.Rd  | InstProps.Ra);
+             Add("11100000xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Ipa,         InstEmit.Ipa,         InstProps.Rd  | InstProps.Ra  | InstProps.Rb  | InstProps.Rc);
++            Add("1110111111000xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.NxIsbe,      InstEmit.NxIsbe,      InstProps.None);
+             Add("1110111111010xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Isberd,      InstEmit.Isberd,      InstProps.Rd  | InstProps.Ra);
+             Add("0101110000011xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Iscadd,      InstEmit.IscaddR,     InstProps.Rd  | InstProps.Ra  | InstProps.Rb);
+             Add("0011100x00011xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", InstName.Iscadd,      InstEmit.IscaddI,     InstProps.Rd  | InstProps.Ra  | InstProps.Ib);
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitAttribute.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitAttribute.cs
+@@ -217,6 +217,71 @@
+             context.Copy(GetDest(op.Dest), res);
+         }
+ 
++        // The stage buffer pseudo instruction of lowered Switch 2 programs: data/dest 0-7, address register 8-15, offset
++        // 20-43, .32 bit 44, attribute region bit 45, write bit 48. Addresses are linear bytes in the region.
++        public static void NxIsbe(EmitterContext context)
++        {
++            ulong raw = context.CurrOp.RawOpCode;
++            int reg = (int)(raw & 0xff);
++            Operand address = context.IAdd(GetSrcReg(context, (int)((raw >> 8) & 0xff)), Const((int)((raw >> 20) & 0xffffff)));
++
++            if (!NxMesh.Active)
++            {
++                throw new System.NotSupportedException("Stage buffer access outside a mesh program");
++            }
++
++            int id = context.ResourceManager.SharedMemoryId;
++
++            if (((raw >> 48) & 1) == 0)
++            {
++                // The input region: byte 0 is the workgroup index, the rest the task's payload (zero without a task).
++                Operand index = context.Load(StorageKind.Input, IoVariable.CtaId, null, Const(0));
++                if (NxMesh.IsTask)
++                {
++                    context.Copy(GetDest(reg), index);
++                    return;
++                }
++                Operand isIndex = context.ICompareEqual(address, Const(0));
++                Operand other = Const(0);
++                if (NxMesh.PayloadWords != 0)
++                {
++                    Operand payloadWord = context.IAdd(context.ShiftRightU32(address, Const(2)), Const(NxMesh.PayloadBase));
++                    other = context.Load(StorageKind.SharedMemory, id, payloadWord);
++                }
++                context.Copy(GetDest(reg), context.ConditionalSelect(isIndex, index, other));
++                return;
++            }
++
++            Operand value = GetSrcReg(context, reg);
++
++            if (NxMesh.IsTask)
++            {
++                // A task's output region: the mesh count at byte 4, the payload after it, linear bytes.
++                context.Store(StorageKind.SharedMemory, id, context.ShiftRightU32(address, Const(2)), value);
++                return;
++            }
++
++            if (((raw >> 45) & 1) != 0)
++            {
++                if (((raw >> 44) & 1) == 0)
++                {
++                    throw new System.NotSupportedException("U8 stage buffer attribute write");
++                }
++
++                context.Store(StorageKind.SharedMemory, id, context.ShiftRightU32(address, Const(2)), value);
++            }
++            else if (((raw >> 44) & 1) != 0)
++            {
++                // The primitive count: the map is written from its end, so its first word is at byte 3.
++                context.Store(StorageKind.SharedMemory, id, Const(NxMesh.AttributeWords + NxMesh.MapWords), value);
++            }
++            else
++            {
++                Operand word = context.IAdd(address, Const(NxMesh.AttributeWords));
++                context.Store(StorageKind.SharedMemory, id, word, context.BitwiseAnd(value, Const(0xff)));
++            }
++        }
++
+         public static void Isberd(EmitterContext context)
+         {
+             InstIsberd op = context.GetOp<InstIsberd>();
+--- /dev/null
++++ b/src/Ryujinx.Graphics.Shader/NxMesh.cs
+@@ -0,0 +1,23 @@
++namespace Ryujinx.Graphics.Shader
++{
++    /// <summary>
++    /// A Switch 2 mesh program, translated as a vertex program whose stage buffer (ISBE) accesses go to workgroup memory.
++    /// Its entry point becomes a MeshEXT one that hands that memory to Vulkan after the program ran. Layout of the shared
++    /// array, in words: the attribute region, one word per map byte, the primitive count. Set per translation by the tool.
++    /// </summary>
++    public static class NxMesh
++    {
++        [System.ThreadStatic] public static int Threads;       // 0: not a mesh program
++        [System.ThreadStatic] public static int MaxVertices;
++        [System.ThreadStatic] public static int MaxPrimitives;
++        [System.ThreadStatic] public static int[] Lines;       // per line: generic * 4 + element, or -1 - system bit
++        [System.ThreadStatic] public static bool IsTask;       // a task program: the shared array is its payload
++        [System.ThreadStatic] public static int PayloadWords;  // task payload, 0 for a mesh program without a task
++
++        public static bool Active => Threads != 0;
++        public static int AttributeWords => (MaxVertices + 31) / 32 * Lines.Length * 32;
++        public static int MapWords => 4 + 3 * MaxPrimitives;
++        public static int PayloadBase => AttributeWords + MapWords + 1;
++        public static int SharedBytes => IsTask ? PayloadWords * 4 : (PayloadBase + PayloadWords) * 4;
++    }
++}
+--- a/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
+@@ -351,6 +351,11 @@
+                 return true;
+             }
+ 
++            if (NxMesh.Active)
++            {
++                return true;
++            }
++
+             if (TranslatorContext.Definitions.LastInVertexPipeline &&
+                 (TranslatorContext.Definitions.Stage == ShaderStage.Vertex || TranslatorContext.Definitions.Stage == ShaderStage.TessellationEvaluation) &&
+                 (TranslatorContext.Options.Flags & TranslationFlags.VertexA) == 0)
+--- a/src/Ryujinx.Graphics.Shader/Translation/TranslatorContext.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/TranslatorContext.cs
+@@ -229,7 +229,11 @@
+ 
+             resourceManager.SetCurrentLocalMemory(_localMemorySize, usesLocalMemory);
+ 
+-            if (Stage == ShaderStage.Compute)
++            if (NxMesh.Active)
++            {
++                resourceManager.SetCurrentSharedMemory(NxMesh.SharedBytes, true);
++            }
++            else if (Stage == ShaderStage.Compute)
+             {
+                 bool usesSharedMemory = _program.UsedFeatures.HasFlag(FeatureFlags.SharedMemory);
+ 
+--- a/src/Spv.Generator/Module.cs
++++ b/src/Spv.Generator/Module.cs
+@@ -11,7 +11,26 @@
+         // TODO: Register on SPIR-V registry.
+         private const int GeneratorId = 0;
+ 
+-        private readonly uint _version;
++        private uint _version;
++
++        public void SetVersion(uint version) => _version = version;
++        public List<Instruction> GlobalVariables => _globals;
++        public void AddMeshOutputs(Instruction vertices, Instruction primitives)
++        {
++            Instruction instruction = NewInstruction((Op)5295);
++            instruction.AddOperand(vertices);
++            instruction.AddOperand(primitives);
++            AddToFunctionDefinitions(instruction);
++        }
++        public void AddEmitMeshTasks(Instruction x, Instruction y, Instruction z, Instruction payload)
++        {
++            Instruction instruction = NewInstruction((Op)5294);
++            instruction.AddOperand(x);
++            instruction.AddOperand(y);
++            instruction.AddOperand(z);
++            instruction.AddOperand(payload);
++            AddToFunctionDefinitions(instruction);
++        }
+ 
+         private uint _bound;
+ 
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Declarations.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Declarations.cs
+@@ -127,7 +127,7 @@
+ 
+                 if (decoratedTypes.Add(structType))
+                 {
+-                    context.Decorate(structType, isBuffer ? Decoration.BufferBlock : Decoration.Block);
++                    context.Decorate(structType, isBuffer && !NxMesh.Active ? Decoration.BufferBlock : Decoration.Block);
+ 
+                     for (int fieldIndex = 0; fieldIndex < structFieldOffsets.Length; fieldIndex++)
+                     {
+@@ -135,8 +135,10 @@
+                     }
+                 }
+ 
+-                SpvInstruction pointerType = context.TypePointer(StorageClass.Uniform, structType);
+-                SpvInstruction variable = context.Variable(pointerType, StorageClass.Uniform);
++                // SPIR-V 1.4, needed by mesh stages, has no BufferBlock: storage buffers use their own class there.
++                StorageClass bufferClass = isBuffer && NxMesh.Active ? StorageClass.StorageBuffer : StorageClass.Uniform;
++                SpvInstruction pointerType = context.TypePointer(bufferClass, structType);
++                SpvInstruction variable = context.Variable(pointerType, bufferClass);
+ 
+                 context.Name(variable, buffer.Name);
+                 context.Decorate(variable, Decoration.DescriptorSet, (LiteralInteger)setIndex);
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
+@@ -1716,7 +1716,7 @@
+                         : context.Properties.StorageBuffers[bindingIndex.Value];
+                     StructureField field = buffer.Type.Fields[fieldIndex.Value];
+ 
+-                    storageClass = StorageClass.Uniform;
++                    storageClass = storageKind == StorageKind.StorageBuffer && NxMesh.Active ? StorageClass.StorageBuffer : StorageClass.Uniform;
+                     varType = field.Type & AggregateType.ElementTypeMask;
+                     baseObj = storageKind == StorageKind.ConstantBuffer
+                         ? context.ConstantBuffers[bindingIndex.Value]
+--- a/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
+@@ -83,7 +83,7 @@
+ 
+             // Vulkan requires the point size to be always written on the shader if the primitive topology is points.
+             // OpenGL requires the point size to be always written on the shader if PROGRAM_POINT_SIZE is set.
+-            if (TranslatorContext.Definitions.Stage == ShaderStage.Vertex)
++            if (TranslatorContext.Definitions.Stage == ShaderStage.Vertex && !NxMesh.Active)
+             {
+                 // TOTK: the point size is NVN state (SetPointSize), not a translation constant: read it from the support buffer, which the
+                 // host fills per draw. A shader that writes gl_PointSize itself overwrites this store.
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Declarations.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Declarations.cs
+@@ -395,7 +395,10 @@
+                 DeclareInputOrOutput(context, ioDefinition, isOutput, isPerPatch, iq, firstLocation);
+             }
+ 
+-            DeclarePerVertexBlock(context);
++            if (!NxMesh.Active)
++            {
++                DeclarePerVertexBlock(context);
++            }
+         }
+ 
+         private static void DeclarePerVertexBlock(CodeGenContext context)
+--- a/src/Ryujinx.Graphics.Shader/Translation/Translator.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Translator.cs
+@@ -187,6 +187,11 @@
+ 
+         private static void EmitOutputsInitialization(EmitterContext context, AttributeUsage attributeUsage, IGpuAccessor gpuAccessor, ShaderStage stage)
+         {
++            if (NxMesh.Active)
++            {
++                return;
++            }
++
+             // Compute has no output attributes, so we
+             // don't need to initialize outputs on that stage.
+             if (stage == ShaderStage.Compute)
+--- a/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
++++ b/src/Ryujinx.Graphics.Shader/CodeGen/Spirv/Instructions.cs
+@@ -531,7 +531,9 @@
+ 
+         private static OperationResult GenerateExponentB2(CodeGenContext context, AstOperation operation)
+         {
+-            return GenerateUnary(context, operation, context.Delegates.GlslExp2, null);
++            // LOCAL TEST (Ocarina): pow(0, c) arrives as exp2(log2(0) * c): exp2(-inf) gives NaN on NVIDIA where the console
++            // gives 0, and that NaN turned whole frames white. Below 2^-1022 everything is zero in 32 bits anyway.
++            return GenerateUnary(context, operation, (type, x) => context.Delegates.GlslExp2(type, context.Delegates.GlslFMax(type, x, context.Constant(type, -1022f))), null);
+         }
+ 
+         private static OperationResult GenerateFSIBegin(CodeGenContext context, AstOperation operation)
+--- a/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/EmitterContext.cs
+@@ -510,7 +510,14 @@
+                             continue;
+                         }
+ 
+-                        Operand src = Register(regIndexBase + component, RegisterType.Gpr);
++                        Operand src = Register(regIndexBase + component, RegisterType.Gpr);
++
++                        // LOCAL TEST (Ocarina): a NaN in a colour output spreads through the blur and bloom chains until the whole frame
++                        // is white. Contained here until its source is known. Integer targets carry plain bits.
++                        if (TranslatorContext.Definitions.GetFragmentOutputColorType(rtIndex).HasFlag(AggregateType.FP32))
++                        {
++                            src = this.ConditionalSelect(this.IsNan(src), ConstF(0f), src);
++                        }
+ 
+                         // Perform B <-> R swap if needed, for BGRA formats (not supported on OpenGL).
+                         if (!supportsBgra && (component == 0 || component == 2))
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitFloatComparison.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitFloatComparison.cs
+@@ -398,4 +398,12 @@
+             srcB = context.FPAbsNeg(srcB, absoluteB, negateB, fpType);
++
++            // .FTZ: on NVIDIA a denormal operand compares as zero; the compilers set it on effectively every compare (seedds/nxnative
++            // 84dea6983). Without it a denormal passes "x != 0" and the 1 / x behind that guard overflows into NaN.
++            if (!isFP64)
++            {
++                srcA = context.ConditionalSelect(context.FPCompareLess(context.FPAbsolute(srcA), ConstF(1.17549435E-38f)), ConstF(0f), srcA);
++                srcB = context.ConditionalSelect(context.FPCompareLess(context.FPAbsolute(srcB), ConstF(1.17549435E-38f)), ConstF(0f), srcB);
++            }
+ 
+             Operand res = GetFPComparison(context, cmpOp, srcA, srcB, fpType);
+             Operand pred = GetPredicate(context, srcPred, srcPredInv);
+@@ -443,4 +451,12 @@
+             srcB = context.FPAbsNeg(srcB, absoluteB, negateB, fpType);
++
++            // .FTZ: on NVIDIA a denormal operand compares as zero; the compilers set it on effectively every compare (seedds/nxnative
++            // 84dea6983). Without it a denormal passes "x != 0" and the 1 / x behind that guard overflows into NaN.
++            if (!isFP64)
++            {
++                srcA = context.ConditionalSelect(context.FPCompareLess(context.FPAbsolute(srcA), ConstF(1.17549435E-38f)), ConstF(0f), srcA);
++                srcB = context.ConditionalSelect(context.FPCompareLess(context.FPAbsolute(srcB), ConstF(1.17549435E-38f)), ConstF(0f), srcB);
++            }
+ 
+             Operand p0Res = GetFPComparison(context, cmpOp, srcA, srcB, fpType);
+             Operand p1Res = context.BitwiseNot(p0Res);

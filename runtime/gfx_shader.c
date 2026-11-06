@@ -108,6 +108,8 @@ struct GfxShader {
     unsigned geometry_position;                         // v2: Position input/output, malformed interface bit 4
     Nvn2C0Layout c0;                                       // NVN 2 compute parameter-block layout, when has_c0
     int has_c0;
+    int is_mesh;                                           // LOCAL TEST (Ocarina): a MeshEXT module in the vertex slot
+    int is_task;                                           // LOCAL TEST (Ocarina): a TaskEXT module
 };
 
 static PlatMutex cache_lock = PLAT_MUTEX_INIT;                  // memory cache
@@ -998,6 +1000,8 @@ static void reflect_spirv(GfxShader *s) {
         if (!len || i + len > n) break;
         const uint32_t *a = w + i + 1;
         uint32_t id = len > 1 ? a[0] : 0;
+        if (op == 15 && len >= 2 && a[0] == 5365) s->is_mesh = 1;   // OpEntryPoint MeshEXT
+        if (op == 15 && len >= 2 && a[0] == 5364) s->is_task = 1;   // OpEntryPoint TaskEXT
         if (op == OP_EXECUTION_MODE && len >= 6 && a[1] == EM_LOCAL_SIZE) {
             s->local[0] = a[2], s->local[1] = a[3], s->local[2] = a[4];
         } else if (op == OP_DECORATE && len >= 4 && id < bound) {
@@ -1152,7 +1156,7 @@ static int reflect(GfxShader *s, int flags) {
     }
     for (int i = 0; i < s->nres[GFX_RES_SSBO]; i++)
         if ((s->res[GFX_RES_SSBO][i].flags & GFX_RES_SSBO_GUARDED) &&
-            storage_version != GFX_STORAGE_CANDIDATES_VERSION) {
+            storage_version != GFX_STORAGE_CANDIDATES_VERSION && s->stage == GFX_STAGE_CS) {
             rt_log("gfx_shader: guarded storage resource without its versioned binding contract");
             return 0;
         }
@@ -1531,6 +1535,16 @@ static size_t build_request(char *o0, const char *hex, const char *stage, const 
         o += sprintf(o, "},\"shared\":%u", a->shared_bytes > nvn2_shared(control) ? a->shared_bytes : nvn2_shared(control));
     }
     if (!a && nvn2_shared(control)) o += sprintf(o, ",\"shared\":%u", nvn2_shared(control));
+    if (!memcmp(control + NVN2_C0_LAYOUT, "DKM1", 4)) {   // LOCAL TEST (Ocarina): nvn2_lower.cpp
+        uint16_t m[4];
+        memcpy(m, control + NVN2_C0_LAYOUT + 4, sizeof m);
+        o += sprintf(o, ",\"mesh\":[%u,%u,%u,%u]", m[0], m[1], m[2], m[3]);
+    }
+    if (!memcmp(control + NVN2_C0_LAYOUT, "DKT1", 4)) {
+        uint16_t m[4];
+        memcpy(m, control + NVN2_C0_LAYOUT + 4, sizeof m);
+        o += sprintf(o, ",\"task\":[%u,%u]", m[0], m[3]);
+    }
     if (!strcmp(stage, "cs")) {
         uint32_t l[3] = {1, 1, 1};
         if (a && (a->local[0] | a->local[1] | a->local[2])) l[0] = a->local[0], l[1] = a->local[1], l[2] = a->local[2];
@@ -2356,6 +2370,8 @@ uint32_t gfx_shader_outputs(const GfxShader *s, GfxShaderIo io[32]) {
     return s->out_mask;
 }
 
+int gfx_shader_is_mesh(const GfxShader *s) { return s->is_mesh; }
+int gfx_shader_is_task(const GfxShader *s) { return s->is_task; }
 void gfx_shader_local_size(const GfxShader *s, uint32_t local[3]) { memcpy(local, s->local, sizeof s->local); }
 
 // ---- answers met in play

@@ -39,7 +39,7 @@ enum {
     R_SetDepthWriteEnable, R_SetFrontFace, R_SetPrimitiveRestartEnable, R_SetPrimitiveTopology,
     R_SetRasterizerDiscardEnable, R_SetScissorWithCount, R_SetStencilCompareMask, R_SetStencilOp, R_SetStencilReference,
     R_SetStencilTestEnable, R_SetStencilWriteMask, R_SetViewportWithCount, R_WriteTimestamp, R_WriteTimestamp2,
-    R_PushTpl, R_Push, R_VertexInput, R_Bool, R_PolygonMode, R_BlendEnable, R_BlendEquation, R_WriteMask, R_EndCb, R_Crumb,
+    R_MeshInd, R_Mesh, R_PushTpl, R_Push, R_VertexInput, R_Bool, R_PolygonMode, R_BlendEnable, R_BlendEquation, R_WriteMask, R_EndCb, R_Crumb,
 };
 
 static uint64_t now_ns(void) { return plat_now_ns(); }
@@ -473,6 +473,18 @@ void rec_push_tpl(PFN_vkCmdPushDescriptorSetWithTemplateKHR fn, VkCommandBuffer 
     pub();
 }
 
+typedef struct { PFN_vkCmdDrawMeshTasksIndirectEXT fn; VkBuffer b; VkDeviceSize o; uint32_t n, stride; } A_MeshInd;
+typedef struct { PFN_vkCmdDrawMeshTasksEXT fn; uint32_t x, y, z; } A_Mesh;
+void rec_mesh(PFN_vkCmdDrawMeshTasksEXT fn, VkCommandBuffer cb, uint32_t x, uint32_t y, uint32_t z) {
+    if (!OWNED(cb)) { fn(cb, x, y, z); return; }
+    A_Mesh *a = put(R_Mesh, sizeof *a);
+    *a = (A_Mesh){fn, x, y, z};
+}
+void rec_mesh_ind(PFN_vkCmdDrawMeshTasksIndirectEXT fn, VkCommandBuffer cb, VkBuffer b, VkDeviceSize o, uint32_t n, uint32_t stride) {
+    if (!OWNED(cb)) { fn(cb, b, o, n, stride); return; }
+    A_MeshInd *a = put(R_MeshInd, sizeof *a);
+    *a = (A_MeshInd){fn, b, o, n, stride};
+}
 typedef struct { PFN_vkCmdPushDescriptorSetKHR fn; VkPipelineBindPoint bp; VkPipelineLayout l; uint32_t set, n;
                  VkWriteDescriptorSet *w; } A_Push;
 void rec_push(PFN_vkCmdPushDescriptorSetKHR fn, VkCommandBuffer cb, VkPipelineBindPoint bp, VkPipelineLayout layout,
@@ -610,6 +622,8 @@ static void exec_packet(uint32_t op, void *p) {
     case R_PipelineBarrier2: vkCmdPipelineBarrier2(cb, p); break;
     case R_BeginRendering: vkCmdBeginRendering(cb, p); break;
     case R_PushTpl: { A_PushTpl *a = p; a->fn(cb, a->tpl, a->l, a->set, a->data); break; }
+    case R_Mesh: { A_Mesh *a = p; a->fn(cb, a->x, a->y, a->z); break; }
+    case R_MeshInd: { A_MeshInd *a = p; a->fn(cb, a->b, a->o, a->n, a->stride); break; }
     case R_Push: { A_Push *a = p; a->fn(cb, a->bp, a->l, a->set, a->n, a->w); break; }
     case R_VertexInput: { A_VertexInput *a = p; a->fn(cb, a->nb, a->b, a->na, a->v); break; }
     case R_Bool: { A_Bool *a = p; a->fn(cb, a->v); break; }

@@ -22,6 +22,7 @@
 #include "cfg.h"
 #include "fs.h"
 #include "host.h"
+#include "kernel.h"
 #include "ov.h"
 #include "platform/platform.h"
 
@@ -263,6 +264,14 @@ static void ov_report_save(Cpu *c) {   // Result PlayReport::Save() and Save(con
     int64_t n = plat_inc64(&reports);
     if (n % 100 == 1) rt_log("prepo: play report kept local (not sent), %lld so far", (long long)n);
     ret_x(c, 0);
+}
+// LOCAL TEST (Ocarina): AsyncContext PlayReport::Send(const account::Uid &), returned through x8: an AsyncContext with no
+// IPC object and result 0, as AsyncContext(Result), so its completion event is signalled at once.
+static void ov_report_send(Cpu *c) {
+    int64_t n = plat_inc64(&reports);
+    if (n % 100 == 1) rt_log("prepo: play report kept local (not sent), %lld so far", (long long)n);
+    uint64_t *ctx = (uint64_t *)(uintptr_t)c->x[8];
+    ctx[0] = 0, ctx[1] = 0;
 }
 static void ov_result_ok(Cpu *c) { ret_x(c, 0); }   // RequestImmediateTransmission, AddInternetConnectionStatus
 
@@ -605,6 +614,24 @@ static void ov_current_time(Cpu *c) {
 // returning the 0x18-byte struct through x8 would write through a stale pointer (time_host.c).
 static void ov_steady_now(Cpu *c) { ret_x(c, (uint64_t)steady_now().value); }
 
+// Result nn::time::Get...CurrentTimespec(timespec *out), what newer SDKs' clock_gettime calls. Seconds and nanoseconds
+// from the host: the steady clock counts from the system tick, the two others are the wall clock.
+static void ov_steady_timespec(Cpu *c) {
+    int64_t *out = arg_p(c, 0);
+    if (!out) { ret_x(c, TIME_R_INVALID); return; }
+    uint64_t ns = kern_now_ns();
+    out[0] = (int64_t)(ns / 1000000000u);
+    out[1] = (int64_t)(ns % 1000000000u);
+    ret_x(c, 0);
+}
+static void ov_clock_timespec(Cpu *c) {
+    int64_t *out = arg_p(c, 0);
+    if (!out) { ret_x(c, TIME_R_INVALID); return; }
+    out[0] = posix_now();
+    out[1] = 0;
+    ret_x(c, 0);
+}
+
 // Result ToCalendarTime(CalendarTime *out, CalendarAdditionalInfo *info, const PosixTime &t): local time
 static void ov_to_calendar(Cpu *c) {
     CalendarTime *out = arg_p(c, 0);
@@ -815,6 +842,8 @@ HOST_OVERRIDE("_ZN2nn2oe17FinishStartupLogoEv", ov_finish_logo);
 HOST_OVERRIDE("_ZN2nn2oe25TryPopNotificationMessageEPj", ov_try_pop);
 HOST_OVERRIDE("_ZN2nn2oe22PopNotificationMessageEv", ov_pop);
 HOST_OVERRIDE("_ZN2nn5prepo10PlayReport4SaveEv", ov_report_save);
+HOST_OVERRIDE("_ZN2nn5prepo10PlayReport4SendERKNS_7account3UidE", ov_report_send);   // LOCAL TEST (Ocarina)
+HOST_OVERRIDE("_ZN2nn5prepo6detail14PlayReportImpl4SendERKNS_7account3UidE", ov_report_send);
 HOST_OVERRIDE("_ZN2nn5prepo10PlayReport4SaveERKNS_7account3UidE", ov_report_save);
 HOST_OVERRIDE("_ZN2nn5prepo28RequestImmediateTransmissionEv", ov_result_ok);
 HOST_OVERRIDE("_ZN2nn5prepo27AddInternetConnectionStatusEPNS0_10PlayReportEPKcS4_S4_", ov_result_ok);
@@ -859,6 +888,9 @@ HOST_OVERRIDE("_ZN2nn7account11GetNicknameEPNS0_8NicknameERKNS0_3UidE", ov_nickn
 HOST_OVERRIDE("_ZN2nn4time10InitializeEv", ov_time_initialize);
 HOST_OVERRIDE("_ZN2nn4time8FinalizeEv", ov_time_finalize);
 HOST_OVERRIDE("_ZN2nn4time13IsInitializedEv", ov_time_ready);
+HOST_OVERRIDE("_ZN2nn4time37GetStandardSteadyClockCurrentTimespecEP8timespec", ov_steady_timespec);
+HOST_OVERRIDE("_ZN2nn4time41GetStandardUserSystemClockCurrentTimespecEP8timespec", ov_clock_timespec);
+HOST_OVERRIDE("_ZN2nn4time43GetAdjustableUserSystemClockCurrentTimespecEP8timespec", ov_clock_timespec);
 HOST_OVERRIDE("_ZN2nn4time23StandardUserSystemClock14GetCurrentTimeEPNS0_9PosixTimeE", ov_current_time);
 HOST_OVERRIDE("_ZN2nn4time26StandardNetworkSystemClock14GetCurrentTimeEPNS0_9PosixTimeE", ov_current_time);
 HOST_OVERRIDE("_ZN2nn4time19StandardSteadyClock3nowEv", ov_steady_now);
@@ -875,3 +907,175 @@ HOST_OVERRIDE("_ZN2nn4time48CalculateStandardUserSystemClockDifferenceByUserERKN
 HOST_OVERRIDE("_ZN2nn2pl22GetSharedFontLoadStateENS0_14SharedFontTypeE", ov_font_state);
 HOST_OVERRIDE("_ZN2nn2pl20GetSharedFontAddressENS0_14SharedFontTypeE", ov_font_address);
 HOST_OVERRIDE("_ZN2nn2pl17GetSharedFontSizeENS0_14SharedFontTypeE", ov_font_size);
+
+// LOCAL TEST (Ocarina): no add-on content. int nn::aoc::CountAddOnContent(), int ListAddOnContent(int *, int, int).
+static void ov_aoc_none(Cpu *c) { ret_x(c, 0); }
+HOST_OVERRIDE("_ZN2nn3aoc17CountAddOnContentEv", ov_aoc_none);
+
+// LOCAL TEST (Ocarina): the game's decoders and parsers leave through longjmp on bad input, which is ordinary flow for them.
+// Lifted functions keep their state on the host stack, so setjmp also keeps a copy of the host stack above it: longjmp puts
+// the bytes back and returns from setjmp a second time, through the same frames, into the lifted caller. Guest memory is
+// not copied, as with a real setjmp. Only the copy's frames must be unchanged since: frames above the caller are suspended.
+// ponytail: x86-64 Windows; a fixed number of buffers, oldest replaced; host locks held by host functions between setjmp
+// and longjmp are not released, none of the callers has any.
+#if defined(_WIN32) && defined(__x86_64__)
+enum { JMP_RECORDS = 32, JMP_STACK = 64 * 1024 };
+typedef struct {
+    uint64_t key;   // the guest jmp_buf
+    void *env[5];   // __builtin_setjmp
+    char *sp, *base;
+    size_t n;
+    uint64_t x[12], gsp;   // x19..x30, sp
+    __typeof__(((Cpu *)0)->v[0]) v[8];   // d8..d15 and the rest of their registers
+    int depth;
+    char *copy;
+} JmpRecord;
+static JmpRecord jmp_records[JMP_RECORDS];
+static unsigned jmp_next;
+static PlatMutex jmp_lock = PLAT_MUTEX_INIT;
+
+static char *teb_stack_base(void) {
+    char *base;
+    __asm__ volatile("movq %%gs:8, %0" : "=r"(base));
+    return base;
+}
+static JmpRecord *jmp_find(uint64_t key, int make) {
+    JmpRecord *r = NULL;
+    plat_mutex_lock(&jmp_lock);
+    for (int i = 0; i < JMP_RECORDS && !r; i++)
+        if (jmp_records[i].key == key) r = &jmp_records[i];
+    if (!r && make) {
+        r = &jmp_records[jmp_next++ % JMP_RECORDS];
+        r->key = key;
+        if (!r->copy && !(r->copy = malloc(JMP_STACK))) rt_fatal("setjmp: out of memory");
+    }
+    plat_mutex_unlock(&jmp_lock);
+    return r;
+}
+__attribute__((noinline)) static void ov_setjmp(Cpu *c) {
+    JmpRecord *r = jmp_find(c->x[0], 1);
+    memcpy(r->x, &c->x[19], sizeof r->x);
+    r->gsp = c->sp;
+    memcpy(r->v, &c->v[8], sizeof r->v);
+    r->depth = c->thread ? *kern_host_depth(c->thread) : 0;
+    if (__builtin_setjmp(r->env)) return;   // from longjmp, which set c->x[0]
+    char *sp;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(sp));
+    r->base = teb_stack_base();
+    r->sp = sp;
+    r->n = (size_t)(r->base - sp) < JMP_STACK ? (size_t)(r->base - sp) : JMP_STACK;
+    memcpy(r->copy, sp, r->n);
+    ret_x(c, 0);
+}
+__attribute__((noinline)) static void jmp_back(Cpu *c, JmpRecord *r, uint64_t val) {
+    memcpy(&c->x[19], r->x, sizeof r->x);
+    c->sp = r->gsp;
+    memcpy(&c->v[8], r->v, sizeof r->v);
+    if (c->thread) *kern_host_depth(c->thread) = r->depth;
+    c->x[0] = val ? val : 1;
+    memcpy(r->sp, r->copy, r->n);
+    __builtin_longjmp(r->env, 1);
+}
+__attribute__((noinline)) static void ov_longjmp(Cpu *c) {
+    static volatile int64_t seen;
+    int64_t n = plat_inc64(&seen);
+    if (n <= 8 || n % 1000 == 0) {
+        char at[160];
+        rt_log("longjmp %lld from %s", (long long)n, ldr_describe(c->x[30], at, sizeof at));
+    }
+    JmpRecord *r = jmp_find(c->x[0], 0);
+    if (!r || !r->copy) rt_fatal("longjmp to %#llx: no setjmp for it", (unsigned long long)c->x[0]);
+    if (r->base != teb_stack_base()) rt_fatal("longjmp to %#llx from another host stack", (unsigned long long)c->x[0]);
+    // The copy goes back above this frame: step past it when longjmp is called from close to setjmp.
+    char *sp;
+    __asm__ volatile("movq %%rsp, %0" : "=r"(sp));
+    if (sp < r->sp + r->n + 0x1000 && sp > r->sp - 0x4000) {
+        volatile char *room = __builtin_alloca((size_t)(sp - r->sp) + 0x8000);
+        room[0] = 0;
+    }
+    jmp_back(c, r, (uint32_t)c->x[1]);
+}
+#else
+static void ov_setjmp(Cpu *c) { ret_x(c, 0); }
+static void ov_longjmp(Cpu *c) { (void)c; rt_fatal("longjmp reached: a guest error path that lifted code cannot take"); }
+#endif
+HOST_OVERRIDE("setjmp", ov_setjmp);
+HOST_OVERRIDE("_setjmp", ov_setjmp);
+HOST_OVERRIDE("longjmp", ov_longjmp);
+HOST_OVERRIDE("_longjmp", ov_longjmp);
+
+// LOCAL TEST (Ocarina): no virtual audio input devices (the SDK asks the auddmg:u service, which the host does not have).
+static void ov_no_virtual_inputs(Cpu *c) { ret_x(c, 0); }
+HOST_OVERRIDE("_ZN2nn5audio6detail23ListVirtualInputDevicesEPNS0_15AudioDeviceNameEi", ov_no_virtual_inputs);
+// LOCAL TEST (Ocarina): no microphone, so its two input streams never open and their Impl pointer stays null. The game purges them at the first
+// note of the ocarina without checking (main+0x336ee7c) and reads their statistics each update (main+0x336d5d4): seedds/nxnative 46404e894.
+static void ov_input_stream_nothing(Cpu *c) { ret_x(c, 0); }
+static void ov_input_stream_stats(Cpu *c) {   // 24 bytes returned through x8
+    void *out = (void *)(uintptr_t)c->x[8];
+    if (out) memset(out, 0, 24);
+}
+HOST_OVERRIDE("_ZN2nn5audio19GetInputStreamStateEPKNS0_15InputStreamTypeE", ov_input_stream_nothing);
+HOST_OVERRIDE("_ZN2nn5audio16PurgeInputStreamEPNS0_15InputStreamTypeE", ov_input_stream_nothing);
+HOST_OVERRIDE("_ZN2nn5audio24GetInputStreamStatisticsEPNS0_15InputStreamTypeEb", ov_input_stream_stats);
+HOST_OVERRIDE("_ZN2nn5audio28GetInputStreamFreeFrameCountEPKNS0_15InputStreamTypeE", ov_input_stream_nothing);
+HOST_OVERRIDE("_ZN2nn5audio32GetInputStreamCapacityFrameCountEPKNS0_15InputStreamTypeE", ov_input_stream_nothing);
+HOST_OVERRIDE("_ZN2nn5audio18SetInputStreamGainEPNS0_15InputStreamTypeEfNS_8TimeSpanE", ov_input_stream_nothing);
+
+
+// LOCAL TEST (Ocarina): void nn::oe::GetDisplayVersion(DisplayVersion *out): a 16-byte name.
+static void ov_display_version(Cpu *c) {
+    char *out = arg_p(c, 0);
+    if (out) { memset(out, 0, 16); memcpy(out, "1.1.1", 5); }
+}
+HOST_OVERRIDE("_ZN2nn2oe17GetDisplayVersionEPNS0_14DisplayVersionE", ov_display_version);
+
+// LOCAL TEST (Ocarina): no network, as a console that is offline.
+static void ov_nifm_zero(Cpu *c) { ret_x(c, 0); }
+HOST_OVERRIDE("_ZN2nn4nifm10InitializeEv", ov_nifm_zero);
+HOST_OVERRIDE("_ZN2nn4nifm18IsNetworkAvailableEv", ov_nifm_zero);
+HOST_OVERRIDE("_ZN2nn4nifm20CancelNetworkRequestEv", ov_nifm_zero);
+HOST_OVERRIDE("_ZN2nn4nifm27SubmitNetworkRequestAndWaitEv", ov_nifm_zero);
+HOST_OVERRIDE("_ZN2nn4nifm31HandleNetworkRequestErrorResultEv", ov_nifm_zero);
+
+// LOCAL TEST (Ocarina): the gyroscope's zero drift mode has no effect here (no motion sensors).
+static void ov_hid_nop(Cpu *c) { (void)c; }
+HOST_OVERRIDE("_ZN2nn3hid25SetGyroscopeZeroDriftModeERKNS0_19SixAxisSensorHandleERKNS0_22GyroscopeZeroDriftModeE", ov_hid_nop);
+
+// LOCAL TEST (Ocarina): sockets and SSL report success and do nothing; the game plays offline.
+static void ov_net_zero(Cpu *c) { ret_x(c, 0); }
+static void ov_net_fail(Cpu *c) { ret_x(c, (uint64_t)(int64_t)-1); }
+HOST_OVERRIDE("_ZN2nn6socket10InitializeERKNS0_6ConfigE", ov_net_zero);
+HOST_OVERRIDE("_ZN2nn6socket8FinalizeEv", ov_net_zero);
+HOST_OVERRIDE("_ZN2nn6socket10SetSockOptEiNS0_5LevelENS0_6OptionEPKvj", ov_net_fail);
+// The game's network library only needs an event fd to exist at start-up. ponytail: one fake descriptor, never signalled.
+static void ov_eventfd(Cpu *c) { ret_x(c, 100); }
+HOST_OVERRIDE("_ZN2nn6socket7EventFdEmNS0_12EventFdFlagsE", ov_eventfd);
+HOST_OVERRIDE("_ZN2nn6socket11EventFdReadEiPm", ov_net_zero);
+HOST_OVERRIDE("_ZN2nn6socket12EventFdWriteEim", ov_net_zero);
+HOST_OVERRIDE("_ZN2nn3ssl10InitializeEv", ov_net_zero);
+HOST_OVERRIDE("_ZN2nn3ssl8FinalizeEv", ov_net_zero);
+
+// LOCAL TEST (Ocarina): network environment "lp1"; name resolution fails, as offline.
+static void ov_nsd_env(Cpu *c) {
+    char *out = arg_p(c, 0);
+    if (out) { memset(out, 0, 8); memcpy(out, "lp1", 3); }
+    ret_x(c, 0);
+}
+HOST_OVERRIDE("_ZN2nn3nsd24GetEnvironmentIdentifierEPNS0_21EnvironmentIdentifierE", ov_nsd_env);
+HOST_OVERRIDE("_ZN2nn3nsd9ResolveExEPNS0_4FqdnERKS1_", ov_net_fail);
+
+// LOCAL TEST (Ocarina): the network library's poll loop: nothing ever arrives. Sleeps without holding a virtual core,
+// at most 100 ms so its event fd (never signalled) cannot stall it for long.
+static void ov_socket_poll(Cpu *c) {
+    int ms = (int)arg_x(c, 2);
+    if (ms < 0 || ms > 100) ms = 100;
+    int away = kern_core_away();
+    plat_sleep_ns((uint64_t)ms * 1000000u);
+    kern_core_back(&away);
+    ret_x(c, 0);
+}
+HOST_OVERRIDE("_ZN2nn6socket4PollEPNS0_6PollFdEmi", ov_socket_poll);
+HOST_OVERRIDE("_ZN2nn6socket4PollEP6pollfdmi", ov_socket_poll);
+HOST_OVERRIDE("_ZN2nn6socket6detail4PollEPNS0_6PollFdEmi", ov_socket_poll);
+HOST_OVERRIDE("_ZN2nn6socket6detail4PollEP6pollfdmi", ov_socket_poll);
+

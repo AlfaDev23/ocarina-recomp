@@ -2,6 +2,7 @@
 // the host can honour without knowing a new NVN 2 structure layout are here; the rest stop with their name
 // (nvn_procs.c) until a call shows what they need.
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "gfx.h"
@@ -64,11 +65,14 @@ NVN_API(nvnCommandBufferSetComputeOverlapMode) { (void)c; }
 // variable-rate shading, conditional enables, device command buffers), they are accepted and
 // recorded nowhere, and the first call of each is logged, so a run lists what the back end still has to do. None of
 // them returns a value.
-#define NVN2_NOT_RECORDED(n)                                                                                         \
-    NVN_API(n) {                                                                                                     \
-        static volatile int32_t logged;                                                                              \
-        (void)c;                                                                                                     \
-        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) rt_log("nvn2: " #n " accepted, not recorded yet");   \
+#define NVN2_NOT_RECORDED(n) \
+    NVN_API(n) { \
+        static volatile int32_t logged; \
+        static volatile int64_t calls;   /* LOCAL TEST (Ocarina): how often */ \
+        (void)c; \
+        if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED)) rt_log("nvn2: " #n " accepted, not recorded yet"); \
+        int64_t ncalls = __atomic_add_fetch(&calls, 1, __ATOMIC_RELAXED); \
+        if (ncalls == 100 || ncalls == 10000) rt_log("nvn2: " #n " called %lld times", (long long)ncalls); \
     }
 #define NVN2_MODE_NOT_RECORDED(n, kind)                                                                               \
     NVN_API(n) {                                                                                                    \
@@ -97,10 +101,40 @@ NVN2_NOT_RECORDED(nvnCommandBufferBindShadingRateImage)
 NVN2_NOT_RECORDED(nvnCommandBufferSetShadingRatePaletteMode)
 NVN2_NOT_RECORDED(nvnCommandBufferShadingRateImagePalette)
 NVN2_NOT_RECORDED(nvnCommandBufferComputeDirtyTileMap)
-NVN2_NOT_RECORDED(nvnCommandBufferDrawMeshTasks)
+// LOCAL TEST (Ocarina): which programs draw through mesh tasks, once per program.
+extern _Thread_local const void *nvn_last_program;
+static void mesh_log(Cpu *c, const char *name) {
+    static uint64_t seen[256];
+    static int n;
+    static volatile int64_t calls;
+    __atomic_add_fetch(&calls, 1, __ATOMIC_RELAXED);
+    const prog_t *p = nvn_last_program;
+    uint64_t key = p ? p->serial : 0;
+    for (int i = 0; i < n; i++) if (seen[i] == key) return;
+    if (n == 256) return;
+    seen[n++] = key;
+    char t[200];
+    int at = 0;
+    t[0] = 0;
+    for (uint32_t i = 0; p && i < p->nstage && i < 6; i++) {
+        const uint8_t *ctl = p->sd[i].control, *d = (const uint8_t *)(uintptr_t)p->sd[i].data;
+        uint32_t w0 = 0, stage = 0;
+        if (d) memcpy(&w0, d, 4);
+        if (ctl) memcpy(&stage, ctl + 0x714, 4);
+        at += snprintf(t + at, sizeof t - (size_t)at, " [%s w0 %#x type %u stage %u]", ctl && gfx_shader_is_nvn2(ctl) ? "RAW" : "ok", w0,
+                       (w0 >> 10) & 15, stage);
+    }
+    rt_log("nvn2: %s: program %llu stages %u%s args %#llx %#llx %#llx (%lld mesh calls so far)", name, (unsigned long long)key,
+           p ? p->nstage : 0, t, (unsigned long long)arg_x(c, 1), (unsigned long long)arg_x(c, 2), (unsigned long long)arg_x(c, 3),
+           (long long)calls);
+}
+NVN_API(nvnCommandBufferDrawMeshTasks) {
+    mesh_log(c, "DrawMeshTasks");
+    extern void nvn_record_draw_mesh(Cpu *);
+    nvn_record_draw_mesh(c);
+}
 NVN2_NOT_RECORDED(nvnCommandBufferDrawMeshTasks3D)
 NVN2_NOT_RECORDED(nvnCommandBufferDrawMeshTasks3DIndirect)
-NVN2_NOT_RECORDED(nvnCommandBufferDrawMeshTasksIndirect)
 NVN2_NOT_RECORDED(nvnCommandBufferMultiDrawMeshTasks3DIndirect)
 NVN2_NOT_RECORDED(nvnCommandBufferMultiDrawMeshTasks3DIndirectCount)
 NVN2_NOT_RECORDED(nvnCommandBufferMultiDrawMeshTasksIndirect)

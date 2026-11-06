@@ -1,0 +1,20 @@
+--- a/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
++++ b/src/Ryujinx.Graphics.Shader/Instructions/InstEmitMemory.cs
+@@ -411,7 +411,16 @@
+             if (context.TranslatorContext.GpuAccessor.QueryStorageBufferRuntimeCandidates() &&
+                 size is not (LsSize.B32 or LsSize.B64 or LsSize.B128))
+             {
+-                throw new System.NotSupportedException("Storage candidates v1 supports naturally aligned B32/B64/B128 global loads only.");
++                // 8 and 16 bits: the aligned word that holds them, then the same extraction as the other memories.
++                (_, Operand smallHigh) = Get40BitsAddress(context, new Register(ra, RegisterType.Gpr), extended, offset);
++                Operand smallAddr = context.IAdd(context.Copy(new Operand(new Register(ra, RegisterType.Gpr))), Const(offset));
++                Operand word = context.Load(StorageKind.GlobalMemory, context.BitwiseAnd(smallAddr, Const(~3)), smallHigh);
++                Register smallDest = new(rd, RegisterType.Gpr);
++                if (!smallDest.IsRZ)
++                {
++                    context.Copy(Register(smallDest), ExtractSmallInt(context, size, GetBitOffset(context, smallAddr), word));
++                }
++                return;
+             }
+             // Naturally aligned 8/16-byte accesses cannot carry between their
+             // scalar words. Get40BitsAddress handles the initial offset carry;

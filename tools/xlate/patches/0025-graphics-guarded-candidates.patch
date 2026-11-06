@@ -1,0 +1,17 @@
+--- a/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
++++ b/src/Ryujinx.Graphics.Shader/Translation/Optimizations/GlobalToStorage.cs
+@@ -862,6 +862,14 @@
+             if (targetCbs.Count == 0)
+             {
+                 gpuAccessor.Log($"Failed to find storage buffer for global memory operation \"{operation.Inst}\" address {DescribeAddress(operation.GetSource(0), 6)}");
++
++                // A pointer read from memory with a run-time index: the runtime lists the buffers it can reach and range guards
++                // pick the one that holds the address, as for compute (dyn_collect). Small integers still read zero.
++                if (operation.StorageKind == StorageKind.GlobalMemory)
++                {
++                    functionId = GenerateGuardedStorageOp(gtsContext, resourceManager, gpuAccessor, targetLanguage, block, operation);
++                    return true;
++                }
+             }
+ 
+             if (gtsContext.TryGetFunctionId(operation, isMultiTarget: true, targetCbs, out functionId))

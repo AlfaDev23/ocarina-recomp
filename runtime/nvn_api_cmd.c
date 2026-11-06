@@ -586,7 +586,9 @@ NVN_API(nvnCommandBufferSetRenderEnableConditional) {
     r->addr = arg_x(c, 2);
 }
 // void nvnCommandBufferBindProgram(NVNcommandBuffer *cmd, const NVNprogram *program, int stages)
+_Thread_local const void *nvn_last_program;   // LOCAL TEST (Ocarina): for the log of mesh draws (nvn_api_nvn2.c)
 NVN_API(nvnCommandBufferBindProgram) {
+    nvn_last_program = arg_p(c, 1);
     *REC(cmd_of(c), OP_BIND_PROGRAM, p_bind_program) = (p_bind_program){arg_p(c, 1), (int)arg_x(c, 2)};
 }
 // void nvnCommandBufferBind{Blend,Color,ChannelMask,Multisample,Polygon,DepthStencil}State(NVNcommandBuffer *cmd,
@@ -816,6 +818,11 @@ NVN_API(nvnCommandBufferDispatchCompute) {
     *REC(cmd_of(c), OP_DISPATCH, p_dispatch) = (p_dispatch){(int)arg_x(c, 1), (int)arg_x(c, 2), (int)arg_x(c, 3), c->x[30]};
 }
 // void nvnCommandBufferDispatchComputeIndirect(NVNcommandBuffer *cmd, NVNbufferAddress indirect): vkCmdDispatchIndirect
+// LOCAL TEST (Ocarina): void nvnCommandBufferDrawMeshTasksIndirect(NVNcommandBuffer *cmd, NVNbufferAddress indirect)
+void nvn_record_draw_mesh(Cpu *c) { *REC(cmd_of(c), OP_DRAW_MESH, p_draw_mesh) = (p_draw_mesh){(uint32_t)arg_x(c, 1), (uint32_t)arg_x(c, 2)}; }
+NVN_API(nvnCommandBufferDrawMeshTasksIndirect) {
+    *REC(cmd_of(c), OP_DRAW_MESH_IND, p_draw_mesh_ind) = (p_draw_mesh_ind){arg_x(c, 1)};
+}
 NVN_API(nvnCommandBufferDispatchComputeIndirect) {
     *REC(cmd_of(c), OP_DISPATCH_IND, p_dispatch_ind) = (p_dispatch_ind){arg_x(c, 1), c->x[30]};
 }
@@ -1098,7 +1105,7 @@ const char *nvn_op_name(uint32_t op) {
         "BIND_VSTREAM", "BIND_VBUF", "BIND_UBO", "BIND_SSBO", "BIND_TEX", "BIND_SAMP", "STENCIL", "POLY_OFFSET", "DRAW",
         "DRAW_IDX", "DISPATCH", "BARRIER", "SET_TEX_POOL", "SET_SAMP_POOL", "COPY_B2T", "COPY_STRIDE", "BLEND_COLOR",
         "COPY_T2B", "BIND_IMG", "COPY_T2T", "RESET_COUNTER", "CLEAR_TEX", "DEPTH_CLAMP", "RENDER_ENABLE",
-        "RASTER_DISCARD", "RENDER_COND", "PRIM_RESTART", "DRAW_IDX_IND", "DISPATCH_IND", "CLEAR_BUF", "PUSH_CONST", "WAIT_SYNC",
+        "RASTER_DISCARD", "RENDER_COND", "PRIM_RESTART", "DRAW_IDX_IND", "DISPATCH_IND", "CLEAR_BUF", "PUSH_CONST", "WAIT_SYNC", "DRAW_MESH_IND", "DRAW_MESH",
     };
     _Static_assert(sizeof names / sizeof *names == OP_COUNT_, "one name per op");
     return op < OP_COUNT_ ? names[op] : "?";

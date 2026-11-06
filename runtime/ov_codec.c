@@ -19,6 +19,8 @@
 #include <string.h>
 
 #include <vpx/vp8dx.h>
+#include <errno.h>
+#include <dav1d/dav1d.h>
 #include <vpx/vpx_decoder.h>
 
 #include "host.h"
@@ -46,6 +48,8 @@ enum { FENCE_TAG = 0xc0de0000u };    // fence token: tag | decoder << 8 | buffer
 typedef struct {
     uint64_t pool;     // guest VideoDecoderImagePoolType registered for this index; 0: not registered
     int state;
+    int fence_done;    // the buffer's fence has fired: it stays so until the buffer is acquired again, even if a flush drops
+                       // the picture (movie::VideoDecoder's callback aborts when a fired fence reads as not signalled)
     uint32_t seq;      // acquisition order: pictures fill the oldest waiting buffer
     uint64_t waiter[WAITERS];   // guest system events of sync point events requested before the picture came
     uint16_t w, h;
@@ -61,6 +65,7 @@ typedef struct {
     uint64_t key;      // guest Vp9DecoderType; 0: unused
     vpx_codec_ctx_t vpx;
     int vpx_ok;
+    Dav1dContext *av1;   // set: an AV1 decoder (dav1d), not libvpx
     uint32_t seq;
     Slot slot[SLOTS];
     Slot last;         // the newest picture, for packets that show none
@@ -125,9 +130,62 @@ static Slot *oldest_wait(Dec *d) {
 // Decodes one packet into the waiting buffer s (lock held). A packet that shows nothing leaves s waiting, except the
 // last one: the player then gets the previous picture (or black) marked as the end. Returns the number of events to
 // signal, stored in wake.
+// One AV1 packet through dav1d. Returns 1 with the newest picture as an image (8-bit; 10-bit is shifted down), which stays
+// valid until the next call. ponytail: HDR is not tone mapped, and only 4:2:0 is expected.
+static void av1_no_free(const uint8_t *buf, void *cookie) { (void)buf; (void)cookie; }
+static int av1_decode(Dec *d, const uint8_t *data, size_t size, vpx_image_t *out) {
+    static Dav1dPicture pic;
+    static int have;
+    static uint8_t *conv[3];
+    static size_t conv_cap[3];
+    Dav1dData in = {0};
+    if (dav1d_data_wrap(&in, data, size, av1_no_free, NULL) < 0) return 0;
+    int got = 0;
+    while (in.sz) {
+        int r = dav1d_send_data(d->av1, &in);
+        if (r < 0 && r != DAV1D_ERR(EAGAIN)) {
+            LOG_FIRST("codec: AV1 packet of %zu bytes failed: %d", size, r);
+            dav1d_data_unref(&in);
+            break;
+        }
+        for (;;) {
+            Dav1dPicture next = {0};
+            r = dav1d_get_picture(d->av1, &next);
+            if (r < 0) break;
+            if (have) dav1d_picture_unref(&pic);
+            pic = next, have = 1, got = 1;
+        }
+    }
+    if (!got) return 0;
+    *out = (vpx_image_t){.d_w = (unsigned)pic.p.w, .d_h = (unsigned)pic.p.h};
+    if (pic.p.bpc == 8) {
+        for (int i = 0; i < 3; i++) out->planes[i] = pic.data[i], out->stride[i] = (int)pic.stride[i ? 1 : 0];
+        return 1;
+    }
+    int shift = pic.p.bpc - 8;
+    for (int i = 0; i < 3; i++) {
+        unsigned w = i ? (pic.p.w + 1u) / 2 : (unsigned)pic.p.w, h = i ? (pic.p.h + 1u) / 2 : (unsigned)pic.p.h;
+        if (conv_cap[i] < (size_t)w * h) {
+            free(conv[i]);
+            conv[i] = malloc((size_t)w * h);
+            if (!conv[i]) rt_fatal("codec: out of memory for an AV1 picture");
+            conv_cap[i] = (size_t)w * h;
+        }
+        for (unsigned y = 0; y < h; y++) {
+            const uint16_t *in16 = (const uint16_t *)((const uint8_t *)pic.data[i] + (ptrdiff_t)y * pic.stride[i ? 1 : 0]);
+            for (unsigned x = 0; x < w; x++) conv[i][(size_t)y * w + x] = (uint8_t)(in16[x] >> shift);
+        }
+        out->planes[i] = conv[i], out->stride[i] = (int)w;
+    }
+    return 1;
+}
+
 static int decode_into(Dec *d, Slot *s, const uint8_t *data, size_t size, int64_t pts, int end, uint64_t wake[WAITERS]) {
     const vpx_image_t *img = NULL, *f;
-    if (d->vpx_ok && data && size) {
+    vpx_image_t av1_img;
+    if (d->av1) {
+        if (data && size && av1_decode(d, data, size, &av1_img)) img = &av1_img;
+    } else if (d->vpx_ok && data && size) {
         if (vpx_codec_decode(&d->vpx, data, (unsigned)size, NULL, 0) != VPX_CODEC_OK)
             LOG_FIRST("codec: VP9 packet of %zu bytes failed: %s", size, vpx_codec_error_detail(&d->vpx));
         vpx_codec_iter_t it = NULL;
@@ -135,6 +193,15 @@ static int decode_into(Dec *d, Slot *s, const uint8_t *data, size_t size, int64_
     }
     int filled = 1;
     if (img) put_picture(s, img), copy_slot(&d->last, s);
+    if (img) {   // LOCAL TEST: is the movie really decoded? The mean luma of the first pictures
+        static int shown;
+        if (shown++ < 8 || shown % 300 == 0) {
+            uint64_t sum = 0;
+            for (uint32_t y = 0; y < s->h; y += 16)
+                for (uint32_t x = 0; x < s->w; x += 16) sum += s->nv12[(size_t)y * s->w + x];
+            rt_log("codec: picture %d %ux%u mean luma %llu", shown, s->w, s->h, (unsigned long long)(sum / (((s->h + 15) / 16) * ((s->w + 15) / 16))));
+        }
+    }
     else if (end && d->last.nv12) copy_slot(s, &d->last);
     else if (end) {
         vpx_image_t black = {.d_w = 16, .d_h = 16};
@@ -148,7 +215,7 @@ static int decode_into(Dec *d, Slot *s, const uint8_t *data, size_t size, int64_
     LOG_FIRST("codec: first VP9 packet: %zu bytes, picture %ux%u", size, s->w, s->h);
     int n = 0;
     if (filled) {
-        s->state = S_FILLED, s->pts = pts, s->eos = end;
+        s->state = S_FILLED, s->fence_done = 1, s->pts = pts, s->eos = end;
         for (int k = 0; k < WAITERS; k++)
             if (s->waiter[k]) wake[n++] = s->waiter[k];
         memset(s->waiter, 0, sizeof s->waiter);
@@ -166,6 +233,7 @@ static void vp9_init(Cpu *c, uint64_t key, unsigned w, unsigned h) {
     if (!d) d = dec_of(0);
     if (!d) rt_fatal("codec: more than %d VP9 decoders", DECODERS);
     if (d->vpx_ok) vpx_codec_destroy(&d->vpx);
+    if (d->av1) dav1d_close(&d->av1);
     for (int i = 0; i < SLOTS; i++) free(d->slot[i].nv12);
     free(d->last.nv12);
     queue_drop(d);
@@ -189,6 +257,7 @@ static void ov_vp9_fini(Cpu *c) {
     Dec *d = dec_of(arg_x(c, 0));
     if (d) {
         if (d->vpx_ok) vpx_codec_destroy(&d->vpx);
+        if (d->av1) dav1d_close(&d->av1);
         for (int i = 0; i < SLOTS; i++) free(d->slot[i].nv12);
         free(d->last.nv12);
         queue_drop(d);
@@ -332,7 +401,7 @@ static void ov_vp9_acquire(Cpu *c) {
         if (d->slot[i].pool && d->slot[i].state == S_FREE) got = i;
     if (got >= 0) {
         Slot *s = &d->slot[got];
-        s->state = S_WAIT, s->seq = d->seq++, s->eos = 0;
+        s->state = S_WAIT, s->fence_done = 0, s->seq = d->seq++, s->eos = 0;
         memset(s->waiter, 0, sizeof s->waiter);
         *index = (uint32_t)got;
         if (fence) *fence = FENCE_TAG | (uint32_t)(d - decs) << 8 | (uint32_t)got;
@@ -464,7 +533,7 @@ static void ov_sp_request(Cpu *c) {
     if ((tok & 0xffff0000u) == FENCE_TAG && (tok >> 8 & 0xff) < DECODERS && (tok & 0xff) < SLOTS) {
         plat_mutex_lock(&lock);
         Slot *s = &decs[tok >> 8 & 0xff].slot[tok & 0xff];
-        if (s->state == S_WAIT)
+        if (s->state == S_WAIT && !s->fence_done)
             for (int k = 0; k < WAITERS; k++)
                 if (!s->waiter[k] || s->waiter[k] == ev) {
                     s->waiter[k] = ev, now = 0;
@@ -489,6 +558,60 @@ static void ov_sp_cancel(Cpu *c) {
 // void DestroySyncPointEvent(SyncPointEventType *): the event stays bound for the next Create on the same object
 static void ov_sp_nop(Cpu *c) { (void)c; }
 
+// LOCAL TEST (Ocarina): AV1 shares the VP9 decoder's slots and events, and decodes with dav1d.
+static void av1_init(Cpu *c, uint64_t key, unsigned w, unsigned h) {
+    vp9_init(c, key, w, h);
+    plat_mutex_lock(&lock);
+    Dec *d = dec_of(key);
+    Dav1dSettings set;
+    dav1d_default_settings(&set);
+    set.n_threads = 4;
+    set.max_frame_delay = 1;   // a picture per packet: the player waits for each one
+    if (d && dav1d_open(&d->av1, &set) < 0) d->av1 = NULL;
+    plat_mutex_unlock(&lock);
+    rt_log("codec: AV1 decoder %ux%u (dav1d %s)%s", w, h, dav1d_version(), d && d->av1 ? "" : " failed to start: pictures stay black");
+}
+static void ov_av1_init(Cpu *c) { av1_init(c, arg_x(c, 0), arg_x(c, 4) & 0xffff, arg_x(c, 5) & 0xffff); }
+static void ov_av1_init_remote(Cpu *c) { av1_init(c, arg_x(c, 0), arg_x(c, 2) & 0xffff, arg_x(c, 3) & 0xffff); }
+static void ov_av1_flush(Cpu *c) {
+    plat_mutex_lock(&lock);
+    Dec *d = dec_of(arg_x(c, 0));
+    if (d && d->av1) dav1d_flush(d->av1);
+    plat_mutex_unlock(&lock);
+    ov_vp9_flush(c);
+}
+static void ov_av1_ready_event(Cpu *c) {   // SystemEventType *GetAv1DecoderSubmissionReadyEvent(Av1DecoderType *)
+    uint64_t ev = event_for(c, arg_x(c, 0));
+    kern_signal_system_event(ev);
+    ret_x(c, ev);
+}
+static void ov_av1_props(Cpu *c) {
+    uint32_t i = (uint32_t)arg_x(c, 7);
+    plat_mutex_lock(&lock);
+    Dec *d = dec_of(arg_x(c, 6));
+    Slot s = d && i < SLOTS ? d->slot[i] : (Slot){0};
+    plat_mutex_unlock(&lock);
+    for (int k = 0; k < 4; k++) {
+        uint16_t *p = arg_p(c, k);
+        if (p) *p = k & 1 ? s.h : s.w;
+    }
+    if (arg_p(c, 4)) *(int64_t *)arg_p(c, 4) = s.pts;
+    if (arg_p(c, 5)) *(uint8_t *)arg_p(c, 5) = (uint8_t)s.eos;
+    ret_x(c, d ? 0 : R_NOT_READY);
+}
+HOST_OVERRIDE("_ZN2nn5codec36InitializeAv1DecoderByTransferMemoryEPNS0_14Av1DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", ov_av1_init);
+HOST_OVERRIDE("_ZN2nn5codec34InitializeAv1DecoderByRemoteMemoryEPNS0_14Av1DecoderTypeEmttjNS0_23VideoDecoderInputFormatENS0_24VideoDecoderOutputFormatENS0_22VideoDecoderOutputModeE", ov_av1_init_remote);
+HOST_OVERRIDE("_ZN2nn5codec18FinalizeAv1DecoderEPNS0_14Av1DecoderTypeE", ov_vp9_fini);
+HOST_OVERRIDE("_ZN2nn5codec15StartAv1DecoderEPNS0_14Av1DecoderTypeE", ov_ok);
+HOST_OVERRIDE("_ZN2nn5codec14StopAv1DecoderEPNS0_14Av1DecoderTypeE", ov_ok);
+HOST_OVERRIDE("_ZN2nn5codec15FlushAv1DecoderEPNS0_14Av1DecoderTypeE", ov_av1_flush);
+HOST_OVERRIDE("_ZN2nn5codec24RegisterAv1DecoderBufferEPNS0_14Av1DecoderTypeEjPNS0_25VideoDecoderImagePoolTypeEj", ov_vp9_register);
+HOST_OVERRIDE("_ZN2nn5codec27SubmitAv1DecoderInputBufferEPmPNS0_14Av1DecoderTypeEPKvmNS_8TimeSpanEb", ov_vp9_submit);
+HOST_OVERRIDE("_ZN2nn5codec29AcquireAv1DecoderOutputBufferEPjPNS_2gs16NativeSyncHandleEPNS0_14Av1DecoderTypeE", ov_vp9_acquire);
+HOST_OVERRIDE("_ZN2nn5codec29ReleaseAv1DecoderOutputBufferEPNS0_14Av1DecoderTypeEjNS_2gs16NativeSyncHandleE", ov_vp9_release);
+HOST_OVERRIDE("_ZN2nn5codec35GetAv1DecoderOutputBufferPropertiesEPtS1_S1_S1_PNS_8TimeSpanEPbPNS0_14Av1DecoderTypeEj", ov_av1_props);
+HOST_OVERRIDE("_ZN2nn5codec33GetAv1DecoderSubmissionReadyEventEPNS0_14Av1DecoderTypeE", ov_av1_ready_event);
+HOST_OVERRIDE("_ZN2nn5codec26InitializeDecoderImagePoolEPNS0_25VideoDecoderImagePoolTypeEPvmRKNS0_27VideoDecoderImagePreferenceEj", ov_pool_init);
 HOST_OVERRIDE("_ZN2nn5codec5video10InitializeEv", ov_video_init);
 HOST_OVERRIDE("_ZN2nn5codec5video8FinalizeEv", ov_video_fini);
 HOST_OVERRIDE("_ZN2nn5codec20InitializeVp9DecoderEPNS0_14Vp9DecoderTypeEPvmmttjNS0_23VideoDecoderInputFormatENS0_"
@@ -525,3 +648,21 @@ HOST_OVERRIDE("_ZN2nn6syncpt3sdk21RequestSyncPointEventEPNS1_18SyncPointEventTyp
               ov_sp_request);
 HOST_OVERRIDE("_ZN2nn6syncpt3sdk20CancelSyncPointEventEPNS1_18SyncPointEventTypeE", ov_sp_cancel);
 HOST_OVERRIDE("_ZN2nn6syncpt3sdk21DestroySyncPointEventEPNS1_18SyncPointEventTypeE", ov_sp_nop);
+
+// LOCAL TEST (Ocarina): a decoded picture's post sync has always passed here (decoding is finished on return).
+// bool TryWaitNativeSync(const NativeSyncHandle &): a decoder fence is signalled once its buffer got a picture, anything
+// else at once. Answering 1 for a buffer that waits for a picture never ended movie::VideoDecoder::Flush: its drain loop
+// releases a frame, reserves a new buffer and asks again, so stopping a movie hung the game (Ocarina's New Game).
+static void ov_try_wait_native_sync(Cpu *c) {
+    const uint32_t *h = arg_p(c, 0);
+    uint32_t tok = h ? *h : 0;
+    int done = 1;
+    if ((tok & 0xffff0000u) == FENCE_TAG && (tok >> 8 & 0xff) < DECODERS && (tok & 0xff) < SLOTS) {
+        plat_mutex_lock(&lock);
+        const Slot *s = &decs[tok >> 8 & 0xff].slot[tok & 0xff];
+        done = s->state != S_WAIT || s->fence_done;
+        plat_mutex_unlock(&lock);
+    }
+    ret_x(c, done);
+}
+HOST_OVERRIDE("_ZN2nn2gs17TryWaitNativeSyncERKNS0_16NativeSyncHandleE", ov_try_wait_native_sync);

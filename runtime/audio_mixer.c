@@ -893,7 +893,7 @@ void audio_device_handler(IpcSession *s, const IpcRequest *rq, IpcResponse *rs) 
         IPC_OUT(rs, v);
         return;
     }
-    case 4: case 11: case 12: {   // QueryAudioDeviceSystemEvent, ...InputEvent, ...OutputEvent
+    case 4: case 11: case 12: case 17: {   // QueryAudioDeviceSystemEvent, ...InputEvent, ...OutputEvent; 17: AcquireAudioOutputDeviceNotification
         uint32_t ev = __atomic_load_n(&change_event, __ATOMIC_ACQUIRE);
         if (!ev) {
             uint32_t mine = kern_event_new(), expected = 0;
