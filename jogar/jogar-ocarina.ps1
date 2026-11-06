@@ -1,4 +1,4 @@
-﻿# Abre o Ocarina Recomp. O atalho da Area de Trabalho chama este arquivo.
+﻿# Abre o Ocarina Recomp.
 $env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
 $env:TOTK_GPL = "0"   # bindless set 2 + an allocated vertex set in an independent layout loses the device
 $env:TOTK_ASYNC_PREEMPT = "0"
