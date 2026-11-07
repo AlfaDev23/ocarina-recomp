@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::EnableVisualStyles()
 $PT = (Get-UICulture).TwoLetterISOLanguageName -eq 'pt'
-function L($pt, $en) { if ($PT) { return $pt } return $en }
+function L($textoPt, $textoEn) { if ($PT) { return $textoPt } return $textoEn }   # not $pt: names are case-insensitive, it would hide $PT
 $TITULO = '0400486024DEC000'
 $NOME = 'Ocarina Recomp'
 
