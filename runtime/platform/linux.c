@@ -108,6 +108,9 @@ PlatThread *plat_thread_new(PlatThreadFn fn, void *arg, const char *name) {
     return plat_thread_new_ex(fn, arg, name, 0);
 }
 
+// force_align_arg_pointer: the caller can be generated code whose stack is 8 bytes off 16; glibc's create_thread then
+// faults on a movaps (SIGSEGV at address 0 on the 98th guest thread). Realign the stack in this function.
+__attribute__((force_align_arg_pointer))
 PlatThread *plat_thread_new_ex(PlatThreadFn fn, void *arg, const char *name, size_t stack) {
     PlatThread *t = calloc(1, sizeof *t);
     if (!t) return NULL;
@@ -324,6 +327,23 @@ PlatFiber *plat_fiber_self(void) {
 }
 
 void plat_fiber_unself(void) { fiber_cur = NULL; }
+
+// The top of the stack the caller runs on: its fiber's mapped stack, else the thread's own (glibc's bounds, read once).
+char *plat_stack_top(void) {
+    PlatFiber *f = fiber_cur;
+    if (f && f->stack) return (char *)f->stack + f->size;
+    static __thread char *top;
+    if (!top) {
+        pthread_attr_t a;
+        void *addr = NULL;
+        size_t size = 0;
+        if (pthread_getattr_np(pthread_self(), &a)) return NULL;
+        pthread_attr_getstack(&a, &addr, &size);
+        pthread_attr_destroy(&a);
+        top = (char *)addr + size;
+    }
+    return top;
+}
 
 PlatFiber *plat_fiber_new(size_t stack, void (*fn)(void *arg), void *arg) {
     PlatFiber *f = calloc(1, sizeof *f);
