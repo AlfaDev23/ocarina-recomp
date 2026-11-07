@@ -3528,6 +3528,13 @@ static uint32_t vs_union_peek(const GfxShader *vs, GfxShaderIo fin[32]) {
 }
 
 static void lb_compute(const GfxShader *cs) {
+    // LOCAL TEST (Ocarina): a big shader is left to big_cs_worker (one at a time, its own cache, only once a dispatch needs it).
+    // Here it was built on every prebuild thread at once in the shared cache, including the skipped movie network (up to 7 million
+    // words): on AMD (LLPC) those compiles ran for many minutes, the graphics pipelines waited behind them and the scene after the
+    // intro stayed black (ocarina-recomp #12, #20, #27).
+    uint64_t words = 0;
+    gfx_shader_spirv(cs, &words);
+    if (words >= big_cs_words()) return;
     struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
     uint64_t h = key_hash(&k, sizeof k);
     Bindings B = {0};
