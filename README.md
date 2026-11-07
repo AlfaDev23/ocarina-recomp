@@ -69,6 +69,20 @@ cd ocarina-recomp
 ./jogar/jogar-ocarina.sh
 ```
 
+### Trazer o save de um emulador
+
+O save do Lichii, do Eden e de emuladores parecidos funciona aqui. No fim da instalação, clique em **Importar save de emulador**, ou rode depois:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File jogar\importar-save.ps1
+```
+
+Ele acha o save sozinho ou pergunta a pasta, guarda uma cópia do seu save atual e não altera o emulador.
+
+### Idioma
+
+O jogo escolhe o idioma pelo do Windows, inclusive português do Brasil. Para trocar, aperte **F1** e vá em **Jogo → Idioma**.
+
 ### O que isto faz no seu PC
 
 - O instalador em ZIP e os scripts não pedem administrador. Só as ferramentas dos jeitos 2 e 3 podem pedir, e é você quem as instala.

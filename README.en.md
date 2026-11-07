@@ -69,6 +69,20 @@ cd ocarina-recomp
 ./jogar/jogar-ocarina.sh
 ```
 
+### Bring a save from an emulator
+
+Saves from Lichii, Eden and similar emulators work here. At the end of the installation, click **Import emulator save**, or run later:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File jogar\importar-save.ps1
+```
+
+It finds the save by itself or asks for the folder, keeps a copy of your current save and does not change the emulator.
+
+### Language
+
+The game follows the language of Windows, including Brazilian Portuguese. To change it, press **F1** and go to **Game → Language**.
+
 ### What this does on your PC
 
 - The ZIP installer and the scripts do not ask for administrator. Only the tools for ways 2 and 3 may, and you install those yourself.

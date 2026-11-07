@@ -91,12 +91,14 @@ $lbPct = Rotulo '' 26 250 588 22 10 $true
 $lbLinha = Rotulo '' 26 274 588 40 8
 $lbLinha.ForeColor = [Drawing.Color]::Gray
 $lbDica = Rotulo $DICAS[0] 26 318 588 44 10
-$btJogar = Botao (L 'Jogar' 'Play') 150 370 160 44
+$btJogar = Botao (L 'Jogar' 'Play') 26 370 180 44
 $btJogar.Font = New-Object Drawing.Font('Segoe UI', 12, [Drawing.FontStyle]::Bold)
 $btJogar.Visible = $false
-$btFechar = Botao (L 'Fechar' 'Close') 330 370 160 44
+$btImportar = Botao (L 'Importar save de emulador' 'Import emulator save') 222 370 228 44
+$btImportar.Visible = $false
+$btFechar = Botao (L 'Fechar' 'Close') 466 370 148 44
 $btFechar.Visible = $false
-$tela2.Controls.AddRange(@($lista, $barra, $lbPct, $lbLinha, $lbDica, $btJogar, $btFechar))
+$tela2.Controls.AddRange(@($lista, $barra, $lbPct, $lbLinha, $lbDica, $btJogar, $btImportar, $btFechar))
 $form.Controls.AddRange(@($tela1, $tela2))
 
 $rodape = Rotulo (L "Feito com $TIGELA por Miojo" "Made with $TIGELA by Miojo") 24 526 300 26 9
@@ -328,7 +330,7 @@ function Instalar() {
         $lbPct.Text = (L 'Pronto! 100%' 'Done! 100%')
         $lbLinha.Text = ''
         $lbDica.Text = (L "Conecte um controle e bom jogo!`nNa primeira vez, a vegetação pode levar alguns minutos para aparecer e áreas novas podem travar um pouco: é normal. Não compartilhe o jogo montado, os saves nem o cache: eles saem do seu jogo." "Plug in a controller and have fun!`nThe first time, plants can take a few minutes to appear and new areas may stutter a little: that is normal. Do not share the built game, the saves or the cache: they come from your game.")
-        $btJogar.Visible = $true; $btFechar.Visible = $true
+        $btJogar.Visible = $true; $btImportar.Visible = $true; $btFechar.Visible = $true
         $script:rodando = $false
         if ($env:OCARINA_AUTO) { Registrar 'INSTALACAO CONCLUIDA'; $form.Close() }
     } catch {
@@ -409,6 +411,7 @@ $btJogar.add_Click({
     $form.Close()
 })
 $btFechar.add_Click({ $form.Close() })
+$btImportar.add_Click({ Start-Process powershell.exe -ArgumentList "-NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script:pasta\jogar\importar-save.ps1`"" })
 $form.add_FormClosing({
     param($s, $e)
     if (-not $script:rodando) { return }
@@ -435,7 +438,7 @@ if (-not $SETUP -or -not (Test-Path -LiteralPath (Join-Path $SETUP 'ferramentas\
 }
 Validar
 if ($env:OCARINA_JOGO) { EscolherJogo $env:OCARINA_JOGO }
-if ($env:OCARINA_AUTO) { if (-not $script:jogo) { throw 'OCARINA_JOGO: jogo nao encontrado' }; $form.add_Shown({ Instalar }) }
+if ($env:OCARINA_AUTO) { if (-not $script:jogo -and -not (JaInstalada $script:pasta)) { throw 'OCARINA_JOGO: jogo nao encontrado' }; $form.add_Shown({ Instalar }) }
 
 try { [void][Windows.Forms.Application]::Run($form) }
 catch {
