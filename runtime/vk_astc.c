@@ -6,7 +6,7 @@
 // BC3's quality: textures look slightly blockier, and data textures (normal maps) lose some precision.
 //
 // TOTK_ASTC = auto (default): native when the device reports textureCompressionASTC_LDR and the format's features,
-// else gpu. gpu: compute decode into RGBA8 (runtime/shaders/astc_decode.comp). native: like auto, but logs when the
+// else cpu on an integrated GPU and gpu otherwise. gpu: compute decode into RGBA8 (runtime/shaders/astc_decode.comp). native: like auto, but logs when the
 // device cannot. cpu: astc_decode_ldr_mt on the uploading thread, as before. check: gpu, and every upload is also
 // decoded on the CPU and compared (waits for the GPU; for testing only).
 //
@@ -351,6 +351,9 @@ int vk_astc_mode(void) {
         else {
             if (want == VK_ASTC_NATIVE) rt_log("vk: TOTK_ASTC=native: the device lacks textureCompressionASTC_LDR; gpu");
             m = want == VK_ASTC_CPU ? VK_ASTC_CPU : want == VK_ASTC_CHECK ? VK_ASTC_CHECK : VK_ASTC_GPU;
+            // auto on an integrated GPU: the CPU. On an Intel Arc 140V the first load of Kokiri Forest decoded about
+            // 780 million texels on the GPU in one go and the device was lost (past Windows' 2 s TDR); on the CPU it loads.
+            if (want == -1 && c->props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) m = VK_ASTC_CPU;
         }
         if ((m == VK_ASTC_GPU || m == VK_ASTC_CHECK || m == VK_ASTC_NATIVE) && !G.pipe && !G.failed &&
             !create_pipeline(c)) {
