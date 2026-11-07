@@ -36,7 +36,7 @@ The game does not come ready-made: it is built on your PC from your copy. Choose
 4. In the window, choose your game's `.nup` (or a folder with `exefs` and `romfs`) and click **Install**.
 5. At the end, click **Play**, or use the **Ocarina Recomp** shortcut on your desktop.
 
-To uninstall, delete the install folder. Want to check first? The executable only opens the [installer script](instalador/Instalar-Ocarina.ps1), and [its code](instalador/launcher.c) is a few lines long. The releases page lists the file's SHA-256. Antivirus programs sometimes complain about unsigned programs.
+To uninstall, delete the install folder. Want to check first? The executable only opens the script `instalador\Instalar-Ocarina.ps1`, beside it in the ZIP and readable in any editor. [The executable's code](instalador/launcher.c) is a few lines long. Some antivirus programs complain about new unsigned programs and PowerShell scripts: a false alarm is possible, and all the code is here for anyone to check. The releases page lists the file's SHA-256.
 
 > [!NOTE]
 > The "Prepare the game files" step is slow, especially on a hard drive: while the clock in the window moves, it is working.

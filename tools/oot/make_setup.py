@@ -7,7 +7,8 @@ git and network access on the first run. Downloads are cached in toolchain\\rele
 
 The folder holds, with nothing derived from the game (tools/check_content.py runs over it):
 
-    Instalar-Ocarina.exe   instalador/launcher.c carrying instalador/Instalar-Ocarina.ps1
+    Instalar-Ocarina.exe   instalador/launcher.c, which opens the script below
+    instalador/            Instalar-Ocarina.ps1, the installer
     projeto/               this repository at HEAD (git archive), without the translator's sources and the tests
     ferramentas/python/    python.org embeddable 3.14, numpy and lz4 (recomp/gen.py)
     ferramentas/llvm/      llvm-mingw, x86_64 only: what clang and lld need to compile and link the game
@@ -222,6 +223,8 @@ def main():
     env = dict(os.environ, PATH=f'{msys};{os.environ["PATH"]}')
     run(['sh', ROOT / 'instalador' / 'build_exe.sh'], env=env)
     shutil.copy2(ROOT / 'instalador' / 'Instalar-Ocarina.exe', folder / 'Instalar-Ocarina.exe')
+    (folder / 'instalador').mkdir()
+    shutil.copy2(ROOT / 'instalador' / 'Instalar-Ocarina.ps1', folder / 'instalador' / 'Instalar-Ocarina.ps1')
     longest = max((p.relative_to(folder).as_posix() for p in folder.rglob('*')), key=len)
     print(f'longest path inside the folder: {len(longest)} characters: {longest}')
     size = sum(f.stat().st_size for f in folder.rglob('*') if f.is_file())

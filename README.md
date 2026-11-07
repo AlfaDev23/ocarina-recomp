@@ -36,7 +36,7 @@ O jogo não vem pronto: ele é compilado no seu PC, a partir da sua cópia. Esco
 4. Na janela, escolha o `.nup` do seu jogo (ou uma pasta com `exefs` e `romfs`) e clique em **Instalar**.
 5. No fim, clique em **Jogar**, ou use o atalho **Ocarina Recomp** na Área de Trabalho.
 
-Para desinstalar, apague a pasta de instalação. Prefere conferir antes? O executável só abre o [script do instalador](instalador/Instalar-Ocarina.ps1), e o [código dele](instalador/launcher.c) tem poucas linhas. A página de versões traz o SHA-256 do arquivo. Antivírus às vezes reclamam de programas sem assinatura.
+Para desinstalar, apague a pasta de instalação. Prefere conferir antes? O executável só abre o script `instalador\Instalar-Ocarina.ps1`, que está ao lado dele no ZIP e pode ser lido em qualquer editor. O [código do executável](instalador/launcher.c) tem poucas linhas. Alguns antivírus reclamam de programas novos sem assinatura e de scripts do PowerShell: é um alarme possível, e o código está todo aqui para quem quiser conferir. A página de versões traz o SHA-256 do arquivo.
 
 > [!NOTE]
 > A etapa "Preparar os arquivos do jogo" é lenta, principalmente em HD: enquanto o relógio da janela andar, está funcionando.
