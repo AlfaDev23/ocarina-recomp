@@ -110,6 +110,7 @@ Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualiz
 |---|---|
 | "Este jogo não é a versão 1.1.1" | Confira se escolheu o jogo certo e atualizado |
 | O jogo abre e fecha | Atualize o driver da placa de vídeo e veja o arquivo `ultima-partida-erros.log` na pasta de instalação |
+| O jogo fechou no meio | O log de cada partida fica guardado em `logs\` (as últimas 10). `jogar\medir-partida.ps1` mostra o crash e o desempenho. |
 | Travadinhas na primeira vez | É normal: os shaders estão sendo preparados. Melhora quando você passa de novo pelo mesmo lugar |
 
 Se continuar, [abra uma issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) com a mensagem de erro e o modelo da sua placa de vídeo. Nunca envie arquivos do jogo.

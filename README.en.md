@@ -110,6 +110,7 @@ It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To upda
 |---|---|
 | "This game is not version 1.1.1" | Check that you chose the right, updated game |
 | The game opens and closes | Update your graphics driver and look at `ultima-partida-erros.log` in the install folder |
+| The game closed mid-play | Each run's log is kept in `logs\` (the last 10). `jogar\medir-partida.ps1` shows the crash and the performance. |
 | Stutter the first time | This is normal: shaders are being prepared. It gets better when you pass through the same place again |
 
 If the problem continues, [open an issue](https://github.com/sostenesfreitas/ocarina-recomp/issues) with the error message and your graphics card model. Never send game files.
