@@ -266,7 +266,7 @@ function P-Codigo() {
     }
     $venv = Join-Path $script:pasta '.venv\Scripts\python.exe'
     if (-not (Test-Path $venv)) { Exec 'py' @('-3.12', '-m', 'venv', (Join-Path $script:pasta '.venv')) | Out-Null }
-    Exec $venv @('-m', 'pip', 'install', '-q', '--disable-pip-version-check', '-r', (Join-Path $script:pasta 'tools\requirements.txt')) | Out-Null
+    Exec $venv @('-m', 'pip', 'install', '-q', '--disable-pip-version-check', '-r', (Join-Path $script:pasta 'tools\requirements-build.txt')) | Out-Null
     $script:py = $venv
 }
 function Build($sub) { return Join-Path $script:pasta "build\$sub" }

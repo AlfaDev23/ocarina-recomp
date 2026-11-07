@@ -35,7 +35,7 @@ C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x8
 git clone https://github.com/sostenesfreitas/ocarina-recomp C:\OcarinaRecomp
 cd C:\OcarinaRecomp
 py -3.12 -m venv .venv
-.venv\Scripts\python.exe -m pip install -r tools\requirements.txt
+.venv\Scripts\python.exe -m pip install -r tools\requirements-build.txt
 ```
 
 **Em todo PowerShell novo**, a partir daqui, comece por:

@@ -68,9 +68,9 @@ try {
     $base = if (Test-Path -LiteralPath (Join-Path $Jogo 'base\exefs\main')) { Join-Path $Jogo 'base' } else { $Jogo }
     $opcoes = @('--package', '0')
 
-    Etapa 1 (L 'Preparar o Python' 'Prepare Python') (L 'Cria um ambiente em .venv e instala os pacotes de tools\requirements.txt. Baixa da internet.' 'Creates an environment in .venv and installs the packages in tools\requirements.txt. Downloads from the internet.')
+    Etapa 1 (L 'Preparar o Python' 'Prepare Python') (L 'Cria um ambiente em .venv e instala os pacotes de tools\requirements-build.txt. Baixa da internet.' 'Creates an environment in .venv and installs the packages in tools\requirements-build.txt. Downloads from the internet.')
     if (-not (Test-Path -LiteralPath $py)) { Cmd 'py' -3.12 -m venv .venv }
-    Cmd $py -m pip install -q --disable-pip-version-check -r tools\requirements.txt
+    Cmd $py -m pip install -q --disable-pip-version-check -r tools\requirements-build.txt
     if ($ehNup -and -not $Simular -and ((& $py tools\extract_nup.py $Jogo --list | Out-String) -notmatch ': 1 package')) { $opcoes = @('--overlay-update') }
 
     Etapa 2 (L 'Extrair e conferir o executável do jogo' "Extract and check the game's executable") (L 'Copia o exefs para build\exefs e confere a versão 1.1.1 pelo hash. Se o main estiver comprimido, baixa o zbic para descomprimir a cópia.' 'Copies the exefs to build\exefs and checks version 1.1.1 by its hash. If main is compressed, downloads zbic to decompress the copy.')

@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\caminho\seu-jo
 
 - Os scripts não pedem administrador. Instalar as ferramentas pode pedir: o instalador faz isso por você, e nos outros jeitos é você quem roda.
 - Escreve só dentro da pasta do projeto, e nunca altera o seu arquivo do jogo.
-- Baixa os pacotes Python (`tools\requirements.txt`) e .NET do tradutor de shaders e, se o executável do jogo estiver comprimido, o [zbic](https://github.com/kinnay/zbic).
+- Baixa os pacotes Python (`tools\requirements-build.txt`) e .NET do tradutor de shaders e, se o executável do jogo estiver comprimido, o [zbic](https://github.com/kinnay/zbic).
 - Para desinstalar, apague a pasta do projeto. As ferramentas do passo 1 saem pelo painel de aplicativos do Windows.
 
 Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualizar, rode de novo o instalador ou veja o fim do guia.
