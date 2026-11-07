@@ -54,6 +54,16 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\caminho\seu-jo
 
 **3. Totalmente à mão:** siga o **[passo a passo para compilar](docs/compilar-manual.md)**.
 
+**No Linux:** o `compilar.sh` faz os mesmos passos e o `jogar/jogar-ocarina.sh` abre o jogo. Os pacotes e o estado do
+port estão em [docs/building.md](docs/building.md#linux-in-progress).
+
+```sh
+git clone https://github.com/sostenesfreitas/ocarina-recomp
+cd ocarina-recomp
+./compilar.sh --jogo /caminho/seu-jogo.nup
+./jogar/jogar-ocarina.sh
+```
+
 ### O que isto faz no seu PC
 
 - Os scripts não pedem administrador. Instalar as ferramentas pode pedir: o instalador faz isso por você, e nos outros jeitos é você quem roda.
