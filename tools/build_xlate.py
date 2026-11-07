@@ -107,6 +107,9 @@ def selected_patches(*, defined_float_minmax: bool = False) -> list[Path]:
 
 def prepare_sources(*, defined_float_minmax: bool = False) -> Path:
     src = BUILD / "ryujinx"
+    if not VENDOR.is_dir():   # the Windows setup ZIP leaves the sources out: it ships the translator built (issue #41)
+        sys.exit(f"{VENDOR} is missing. The projeto folder of the Windows setup ZIP has no translator sources: "
+                 "build from a clone instead, git clone https://github.com/sostenesfreitas/ocarina-recomp")
     if BUILD.exists():
         shutil.rmtree(BUILD / "ryujinx", ignore_errors=True)
     shutil.copytree(VENDOR, src)
