@@ -59,6 +59,16 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\path\your-game
 
 **3. Fully by hand:** follow the **[step-by-step build guide](docs/build-by-hand.md)**.
 
+**On Linux:** `compilar.sh` runs the same steps and `jogar/jogar-ocarina.sh` opens the game. Packages and the port's
+status are in [docs/building.md](docs/building.md#linux-in-progress).
+
+```sh
+git clone https://github.com/sostenesfreitas/ocarina-recomp
+cd ocarina-recomp
+./compilar.sh --jogo /path/your-game.nup
+./jogar/jogar-ocarina.sh
+```
+
 ### What this does on your PC
 
 - The ZIP installer and the scripts do not ask for administrator. Only the tools for ways 2 and 3 may, and you install those yourself.
