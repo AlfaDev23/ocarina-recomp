@@ -3527,7 +3527,7 @@ static struct {
     uint8_t clamp, poly, minus_w, samples;             // library state (GKey fields)
     double t0, ms[3];                                  // ms: build time per kind (vertex, fragment, compute)
     // warmed: driver cache only; nolib: vertex and fragment variants skipped with the graphics pipeline library off
-    uint64_t built[3], have[3], fail[3], warmed[3], noshader, nolib, done, cs_draw;
+    uint64_t built[3], have[3], fail[3], warmed[3], noshader, nolib, done, cs_draw, big_skipped;
     double warm_ms[3];
     volatile int32_t kept;                                // libraries entered in libs[] so far
     int32_t keep_n;
@@ -3783,7 +3783,7 @@ static void lb_report(const char *how) {
     plat_mutex_lock_shared(&LB.stat);
     rt_log("vk_pipeline: stage library prebuild %s: %llu of %zu variants in %.0f ms; kept: vertex %llu built (avg %.1f ms), "
            "%llu there; fragment %llu built (avg %.1f ms), %llu there; compute %llu built (avg %.1f ms), %llu there; driver "
-           "cache only: vertex %llu (avg %.1f ms), fragment %llu (avg %.1f ms), compute %llu (avg %.1f ms); %llu failed, %llu not in the shader cache, "
+           "cache only: vertex %llu (avg %.1f ms), fragment %llu (avg %.1f ms), compute %llu (avg %.1f ms); %llu failed, %llu big compute left to play, %llu not in the shader cache, "
            "%llu vertex/fragment skipped (graphics pipeline library off); process working set %.0f MB", how, (unsigned long long)LB.done, LB.n,
            now_ms() - LB.t0, (unsigned long long)LB.built[0], LB.built[0] ? LB.ms[0] / LB.built[0] : 0.0,
            (unsigned long long)LB.have[0], (unsigned long long)LB.built[1], LB.built[1] ? LB.ms[1] / LB.built[1] : 0.0,
@@ -3791,7 +3791,7 @@ static void lb_report(const char *how) {
            (unsigned long long)LB.have[2], (unsigned long long)LB.warmed[0], LB.warmed[0] ? LB.warm_ms[0] / LB.warmed[0] : 0.0,
            (unsigned long long)LB.warmed[1], LB.warmed[1] ? LB.warm_ms[1] / LB.warmed[1] : 0.0,
            (unsigned long long)LB.warmed[2], LB.warmed[2] ? LB.warm_ms[2] / LB.warmed[2] : 0.0,
-           (unsigned long long)(LB.fail[0] + LB.fail[1] + LB.fail[2]),
+           (unsigned long long)(LB.fail[0] + LB.fail[1] + LB.fail[2]), (unsigned long long)LB.big_skipped,
            (unsigned long long)LB.noshader, (unsigned long long)LB.nolib, (double)mem_proc);
     plat_mutex_unlock_shared(&LB.stat);
 }
@@ -3895,9 +3895,16 @@ static void lb_warm_worker(void *arg) {
         int owned = 0;
         const GfxShader *sh = gfx_shader_load_private(LB.e[i].iid, &owned);
         int st = sh ? gfx_shader_stage(sh) : -1;
+        uint64_t words = 0;
         if (!sh) {
             plat_mutex_lock(&LB.stat);
             LB.noshader++;
+            plat_mutex_unlock(&LB.stat);
+        } else if (st == GFX_STAGE_CS && gfx_shader_spirv(sh, &words) && words >= big_cs_words()) {
+            // As lb_compute: a big shader is left to big_cs_worker in play. Here it held the preparation for many minutes
+            // (some are the movie network the game skips, up to 7 million words). Suggested by robk3 on issue #15.
+            plat_mutex_lock(&LB.stat);
+            LB.big_skipped++;
             plat_mutex_unlock(&LB.stat);
         } else if (st == GFX_STAGE_CS) {
             Bindings B = {0};
