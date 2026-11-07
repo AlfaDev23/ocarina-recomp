@@ -485,7 +485,11 @@ $ram = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory 
 if ($ram -lt 15) { $script:avisos += (L "Este PC tem $ram GB de RAM. Com menos de 16 GB, nunca testamos: a compilação ou o jogo podem falhar." "This PC has $ram GB of RAM. We never tested with less than 16 GB: the build or the game may fail.") }
 $gpus = (Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }) -join ', '
 Add-Type -Namespace Ocarina -Name Cpu -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint f);'
-if (-not [Ocarina.Cpu]::IsProcessorFeaturePresent(40)) { $script:avisos += (L 'Este processador não tem AVX2, então o jogo não deve funcionar.' 'This processor has no AVX2, so the game should not work.'); $script:bloqueio = $true }
+# PF_AVX2 (40) is answered from Windows 10 2004 on; older Windows says 0 for it and for SSSE3 (36), which every x64 CPU has
+if (-not [Ocarina.Cpu]::IsProcessorFeaturePresent(40)) {
+    if ([Ocarina.Cpu]::IsProcessorFeaturePresent(36)) { $script:avisos += (L 'Este processador não tem AVX2, então o jogo não deve funcionar.' 'This processor has no AVX2, so the game should not work.'); $script:bloqueio = $true }
+    else { $script:avisos += (L 'Esta versão do Windows não informa se o processador tem AVX2. O jogo precisa de AVX2.' 'This Windows version does not say whether the processor has AVX2. The game needs it.') }
+}
 if ($gpus -notmatch 'NVIDIA') { $script:avisos += (L "Só testamos em placa NVIDIA. Sua placa ($gpus) pode não funcionar." "We only tested on NVIDIA cards. Your card ($gpus) may not work.") }
 if (-not $SETUP -or -not (Test-Path -LiteralPath (Join-Path $SETUP 'ferramentas\python\python.exe'))) {
     $script:avisos += (L 'Extraia o ZIP inteiro para uma pasta e abra o instalador de dentro dela.' 'Unpack the whole ZIP to a folder and open the installer from inside it.')

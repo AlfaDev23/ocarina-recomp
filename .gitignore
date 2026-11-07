@@ -75,3 +75,5 @@ desktop.ini
 
 # Agent task worktrees (tools/worktree.py)
 /.worktrees/
+/logs/
+/ultima-partida*.log

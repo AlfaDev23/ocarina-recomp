@@ -61,8 +61,8 @@ static uint32_t nvn2_shared(const uint8_t *control) {
 #define CODE_SKIP 0x30                                     // graphics code starts after the first 0x30 bytes of the program
 #define BUCKETS 4096
 #define LINE_MAX_LEN 4096
-#define KEY_VERSION 5                                      // in every cache key; bump when the key layout or the use of the
-                                                           // output changes here (5: guarded storage binding contract);
+#define KEY_VERSION 6                                      // in every cache key; bump when the key layout or the use of the
+                                                           // output changes here (6: non-overlapping c0 candidate list);
                                                            // translator changes are covered by its identity
 #define IN_VERSION 1                                       // legacy input-ID schema and non-GS .in storage version
 #define USE_MAGIC 0x4d554b54u                              // "TKUM", .use files
@@ -1135,7 +1135,7 @@ static int reflect(GfxShader *s, int flags) {
                 if (*q++ != (i + 1 == n ? ']' : ',')) return 0;
             }
         }
-        if (!nvn2_c0_valid(&s->c0, NVN2_C0_BYTES)) return 0;
+        if (!nvn2_c0_valid(&s->c0, NVN2_C0_LIST)) return 0;   // the same bound the dispatch packs against, so a bad layout fails here
         s->has_c0 = 1;
     }
     if (require_c0 && !s->has_c0) {

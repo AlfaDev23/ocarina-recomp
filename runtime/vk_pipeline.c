@@ -153,9 +153,16 @@ static uint64_t key_hash(const void *k, size_t n) { return nvn_hm_hash(k, (uint3
 static PlatMutex cache_access = PLAT_MUTEX_INIT;
 
 static void cache_merge(VkPipelineCache source) {
-    // A queued writer can block new readers behind a slow driver compile.
-    // Only start the merge when existing cache users have released their locks.
-    while (!plat_mutex_trylock(&cache_access)) plat_sleep_ms(5);
+    // A queued writer can block replay behind a slow driver compile. Keep the
+    // compiled pipeline even if the cache stays busy (VUID 10202).
+    const uint64_t deadline = plat_now_ns() + 50000000;
+    while (!plat_mutex_trylock(&cache_access)) {
+        if (plat_now_ns() >= deadline) {
+            rt_log("vk_pipeline: cache merge skipped after waiting 50 ms for the shared cache");
+            return;
+        }
+        plat_sleep_ms(5);
+    }
     if (P.cache) vkMergePipelineCaches(P.device, P.cache, 1, &source);
     plat_mutex_unlock(&cache_access);
 }
@@ -2067,7 +2074,7 @@ static uint32_t vs_union_missing(const VkPipeState *s, GfxShaderIo fin[32]) {
 
 static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Layout *l, uint32_t fs_off,
                                   VkPipelineCache cache) {
-    if (gfx_shader_is_task(s->vs) || (s->ts && !mesh_vs(s))) {
+    if (gfx_shader_is_task(s->vs) || (s->ts && !mesh_vs(s))) {   // a task shader needs its mesh stage (PR #29, qiyuey)
         rt_log("vk_pipeline: task shader requires a mesh stage");
         return VK_NULL_HANDLE;
     }
@@ -2238,10 +2245,24 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
         pi.pVertexInputState = NULL, pi.pInputAssemblyState = NULL;
     }
     uint64_t p0 = perf_begin();
+    static _Thread_local char note[200];   // named in the log if the driver crashes in this create (platform last-chance filter)
+    {
+        const GfxShader *st[4] = {s->ts, s->vs, s->gs, s->fs};
+        int at = snprintf(note, sizeof note, "graphics pipeline, mesh %d task %d:", mesh_vs(s), s->ts != NULL);
+        for (int i = 0; i < 4 && at < (int)sizeof note; i++) {
+            uint64_t w = 0, h = 1469598103934665603ull;   // FNV-1a of the SPIR-V: the same shader across runs
+            const uint32_t *c = st[i] ? gfx_shader_spirv(st[i], &w) : NULL;
+            for (uint64_t j = 0; c && j < w; j++) h = (h ^ c[j]) * 1099511628211ull;
+            if (c) at += snprintf(note + at, sizeof note - at, " %s %llu words %016llx", (const char *[]){"ts", "vs", "gs", "fs"}[i],
+                                  (unsigned long long)w, (unsigned long long)h);
+        }
+    }
+    plat_crash_note(note);
     int shared = cache && cache == P.cache;
     if (shared) plat_mutex_lock_shared(&cache_access);
     VkResult r = vkCreateGraphicsPipelines(P.device, cache, 1, &pi, NULL, &pipe);
     if (shared) plat_mutex_unlock_shared(&cache_access);
+    plat_crash_note(NULL);
     perf_end(PERF_PIPE, p0);   // counts on the render thread only, so background builds stay out of it
     if (r != VK_SUCCESS) {
         rt_log("vk_pipeline: vkCreateGraphicsPipelines failed (%d)", (int)r);
@@ -3495,13 +3516,27 @@ static void big_cs_worker(void *arg) {
         cs_build_cache = own;
         VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
         cs_build_cache = VK_NULL_HANDLE;
-        if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        // Kept, as lb_compute keeps its pipelines: built again on the replay thread, the driver's cache missed and the game froze for
+        // the whole compile a second time (62 s after big compute shader 31, a 21-minute run).
+        int built = pipe != VK_NULL_HANDLE;
+        if (pipe) {
+            struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
+            uint64_t h = key_hash(&k, sizeof k);
+            plat_mutex_lock(&P.lock);
+            if (!pipe_find(&k, sizeof k, h)) {
+                pipe_add(&k, sizeof k, h, pipe, l, &B, VK_PIPELINE_BIND_POINT_COMPUTE, 0);
+                P.stats.compute++;
+                pipe = VK_NULL_HANDLE;
+            }
+            plat_mutex_unlock(&P.lock);
+            if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        }
+        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, built ? "" : " (failed)");
+        __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         if (own) {
-            cache_merge(own);
+            if (built) cache_merge(own);
             vkDestroyPipelineCache(P.device, own, NULL);
         }
-        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, pipe ? "" : " (failed)");
-        __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         next++;
     }
 }
@@ -3593,6 +3628,13 @@ static uint32_t vs_union_peek(const GfxShader *vs, GfxShaderIo fin[32]) {
 }
 
 static void lb_compute(const GfxShader *cs) {
+    // LOCAL TEST (Ocarina): a big shader is left to big_cs_worker (one at a time, its own cache, only once a dispatch needs it).
+    // Here it was built on every prebuild thread at once in the shared cache, including the skipped movie network (up to 7 million
+    // words): on AMD (LLPC) those compiles ran for many minutes, the graphics pipelines waited behind them and the scene after the
+    // intro stayed black (ocarina-recomp #12, #20, #27).
+    uint64_t words = 0;
+    gfx_shader_spirv(cs, &words);
+    if (words >= big_cs_words()) return;
     struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
     uint64_t h = key_hash(&k, sizeof k);
     Bindings B = {0};
@@ -3748,7 +3790,7 @@ static void lb_state(const uint32_t pr_hist[16], const uint32_t fs_hist[4]) {
 // Boot: compute shaders of the warm list (recorded and prepared), then the first KEEP recorded graphics variants.
 static void lb_start(const uint32_t pr_hist[16], const uint32_t fs_hist[4]) {
     const char *e = cfg_value("TOTK_LIB_PREBUILD"), *ke = cfg_get("TOTK_LIB_PREBUILD_KEEP");
-    const char *te = cfg_get("TOTK_LIB_PREBUILD_THREADS");   // no fixed default: a quarter of the CPUs when unset
+    const char *te = cfg_get("TOTK_LIB_PREBUILD_THREADS");   // explicit overrides keep their existing meaning
     if (!A.on || !cfg_bool("TOTK_LIB_PREBUILD")) return;
     GfxWarmEnt *all = NULL;
     size_t total = gfx_shader_warm_list(&all), n = 0, n_cs = 0;
@@ -3769,7 +3811,11 @@ static void lb_start(const uint32_t pr_hist[16], const uint32_t fs_hist[4]) {
     lb_state(pr_hist, fs_hist);
     LB.idle = 1;
     int cpus = (int)plat_cpu_usable();
-    int t = te && *te ? atoi(te) : cpus / 4;
+    // Speculative NVIDIA builds can slow foreground replay despite idle worker
+    // priority. Keep prebuild enabled, but serialize its default worker pool.
+    const VkCtx *ctx = vk_ctx();
+    int default_threads = ctx && ctx->props.vendorID == 0x10de ? 1 : cpus / 4;
+    int t = te && *te ? atoi(te) : default_threads;
     t = t < 1 ? 1 : t > LB_MAX_THREADS ? LB_MAX_THREADS : t;
     if ((size_t)t > n) t = (int)n;
     LB.t0 = now_ms();
