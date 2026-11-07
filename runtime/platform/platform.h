@@ -56,6 +56,7 @@ int plat_intr_resume(PlatIntr *t, uint64_t to);
 // thread. Each switch keeps the callee-saved registers and the floating-point control state.
 typedef struct PlatFiber PlatFiber;
 PlatFiber *plat_fiber_self(void);         // the calling thread's own context as a fiber, once before its first switch
+char *plat_stack_top(void);               // Linux: the top of the stack the caller runs on (its fiber's, else its thread's)
 void plat_fiber_unself(void);             // the calling thread stops being a fiber (it is on its own context again)
 // A fiber that runs fn(arg) on a stack of stack bytes (reserved, committed as it grows); fn never returns.
 PlatFiber *plat_fiber_new(size_t stack, void (*fn)(void *arg), void *arg);
