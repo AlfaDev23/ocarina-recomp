@@ -2228,6 +2228,18 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
         pin_subgroup32(st, &rq[stage_count], scode, sw);
         stage_count++;
     }
+    {
+        // Vulkan needs a vertex or a mesh stage (VUID-VkGraphicsPipelineCreateInfo-stage-02096). A vertex slot whose
+        // shader resolved to another stage gave the driver a pipeline without one: NVIDIA rejects it, AMD's can fault.
+        int pre_raster = 0;
+        for (uint32_t i = 0; i < stage_count; i++)
+            pre_raster |= stages[i].stage == VK_SHADER_STAGE_VERTEX_BIT || stages[i].stage == VK_SHADER_STAGE_MESH_BIT_EXT;
+        if (!pre_raster) {
+            LOG_ONCE("vk_pipeline: a graphics pipeline has no vertex or mesh stage (vertex slot is stage %#x); not built",
+                     stage_count ? (unsigned)stages[0].stage : 0u);
+            goto out;
+        }
+    }
     VkVertexInputAttributeDescription va[32];
     VkVertexInputBindingDescription vb[17];
     uint32_t na = 0, nb = 0;
