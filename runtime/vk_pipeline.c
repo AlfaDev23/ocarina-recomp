@@ -3430,12 +3430,26 @@ static void big_cs_worker(void *arg) {
         cs_build_cache = own;
         VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
         cs_build_cache = VK_NULL_HANDLE;
-        if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        // Kept, as lb_compute keeps its pipelines: built again on the replay thread, the driver's cache missed and the game froze for
+        // the whole compile a second time (62 s after big compute shader 31, a 21-minute run).
+        int built = pipe != VK_NULL_HANDLE;
+        if (pipe) {
+            struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
+            uint64_t h = key_hash(&k, sizeof k);
+            plat_mutex_lock(&P.lock);
+            if (!pipe_find(&k, sizeof k, h)) {
+                pipe_add(&k, sizeof k, h, pipe, l, &B, VK_PIPELINE_BIND_POINT_COMPUTE, 0);
+                P.stats.compute++;
+                pipe = VK_NULL_HANDLE;
+            }
+            plat_mutex_unlock(&P.lock);
+            if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        }
         if (own) {
             vkMergePipelineCaches(P.device, P.cache, 1, &own);
             vkDestroyPipelineCache(P.device, own, NULL);
         }
-        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, pipe ? "" : " (failed)");
+        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, built ? "" : " (failed)");
         __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         next++;
     }
