@@ -1028,7 +1028,7 @@ static void c0_table(uint8_t *at, const p_bind_buf b[16]) {
 // see: it tests the addresses listed in c0 + 0x900, 16 bytes each (address, size). Collected per dispatch from the bound
 // uniform and storage buffers, following stored pointers two levels down. ponytail: only stored pointers near the start of
 // a buffer are followed and each binding stops at 32 MiB; a real fix would give shaders the guest address space.
-#define DYN_C0 0x900
+#define DYN_C0 NVN2_C0_LIST
 #define DYN_N 32
 _Static_assert(0x770 + 16 * 16 <= DYN_C0, "native mesh table overlaps candidates");
 _Static_assert(DYN_C0 + DYN_N * 16 <= VK_C0_BYTES, "candidate list exceeds bank");
@@ -2939,12 +2939,26 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
             }
         }
     }
+    // Before the vertex slot is read: a shader still translating there can turn out to be a task shader (PR #29, qiyuey);
+    // built as a vertex stage it crashed NVIDIA's compiler (nvgpucomp64.dll) at the Deku Tree scene start.
+    // A draw into a target the previous frame did not render (or into none) waits for a pending shader or pipeline:
+    // one-shot draws (volumes and LUTs generated once, later only sampled) would leave their target empty for the
+    // session. A draw into per-frame targets is skipped until they are ready and comes back next frame.
+    int oneshot = -1, skip = pipe_skip_mode();   // -1: not looked up
+    if (vs_wait || fs_wait || gs_wait) {
+        if (!(oneshot = !vk_exec_targets_recent(ex, skip >= 1))) return perf_count(PERF_CNT_SHADER_SKIP), 0;   // skipped until ready
+        perf_count(PERF_CNT_ONESHOT_WAIT);
+        if (vs_wait) vs = shader_for(ex, NVN_STAGE_VS, &has_vs, NULL, 1);
+        if (fs_wait) fs = shader_for(ex, NVN_STAGE_FS, &has_fs, NULL, 1);
+        native_gs_vs = vs, native_gs_fs = fs;
+        if (gs_wait) gs = shader_for(ex, NVN_STAGE_GS, &has_gs, NULL, 1);
+    }
     const GfxShader *ts = NULL;
     if (vs && gfx_shader_is_task(vs)) {   // LOCAL TEST (Ocarina): task in the vertex slot, mesh in the tessellation slot
         int has_mesh = 0;
         ts = vs;
         vs = shader_for(ex, 4, &has_mesh, NULL, 1);
-        if (!vs) return draw_why(ex, "task without a mesh stage"), 0;
+        if (!vs || !gfx_shader_is_mesh(vs)) return draw_why(ex, "task without a mesh stage"), 0;
         mesh_task_draw = 1;
         B.c0_valid[0] = 0;
     }
@@ -2978,18 +2992,6 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
                        (unsigned long long)nvn2_origin(vcode), k[1], (unsigned long long)nvn2_origin(fcode));
             }
         }
-    }
-    // A draw into a target the previous frame did not render (or into none) waits for a pending shader or pipeline:
-    // one-shot draws (volumes and LUTs generated once, later only sampled) would leave their target empty for the
-    // session. A draw into per-frame targets is skipped until they are ready and comes back next frame.
-    int oneshot = -1, skip = pipe_skip_mode();   // -1: not looked up
-    if (vs_wait || fs_wait || gs_wait) {
-        if (!(oneshot = !vk_exec_targets_recent(ex, skip >= 1))) return perf_count(PERF_CNT_SHADER_SKIP), 0;   // skipped until ready
-        perf_count(PERF_CNT_ONESHOT_WAIT);
-        if (vs_wait) vs = shader_for(ex, NVN_STAGE_VS, &has_vs, NULL, 1);
-        if (fs_wait) fs = shader_for(ex, NVN_STAGE_FS, &has_fs, NULL, 1);
-        native_gs_vs = vs, native_gs_fs = fs;
-        if (gs_wait) gs = shader_for(ex, NVN_STAGE_GS, &has_gs, NULL, 1);
     }
     if (stage_diag_skip(ex, vs)) { if (draw_is_mesh) draw_why(ex, "stage diag skip"); return 0; }
     if (light_quad_fault_skip(ex, vs, fs)) return draw_why(ex, "light quad skip"), 0;

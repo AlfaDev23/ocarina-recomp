@@ -2055,6 +2055,10 @@ static uint32_t vs_union_missing(const VkPipeState *s, GfxShaderIo fin[32]) {
 }
 
 static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Layout *l, uint32_t fs_off) {
+    if (gfx_shader_is_task(s->vs) || (s->ts && !mesh_vs(s))) {   // a task shader needs its mesh stage (PR #29, qiyuey)
+        rt_log("vk_pipeline: task shader requires a mesh stage");
+        return VK_NULL_HANDLE;
+    }
     if (s->gs && (l->set1 || !k->geometry_input || k->geometry_input > GFX_GEOMETRY_TRIANGLES_ADJACENCY)) return VK_NULL_HANDLE;
     VkShaderModule vm = VK_NULL_HANDLE, fm = VK_NULL_HANDLE, gm = VK_NULL_HANDLE;
     uint64_t vw, fw;
@@ -2222,7 +2226,21 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
         pi.pVertexInputState = NULL, pi.pInputAssemblyState = NULL;
     }
     uint64_t p0 = perf_begin();
+    static _Thread_local char note[200];   // named in the log if the driver crashes in this create (platform last-chance filter)
+    {
+        const GfxShader *st[4] = {s->ts, s->vs, s->gs, s->fs};
+        int at = snprintf(note, sizeof note, "graphics pipeline, mesh %d task %d:", mesh_vs(s), s->ts != NULL);
+        for (int i = 0; i < 4 && at < (int)sizeof note; i++) {
+            uint64_t w = 0, h = 1469598103934665603ull;   // FNV-1a of the SPIR-V: the same shader across runs
+            const uint32_t *c = st[i] ? gfx_shader_spirv(st[i], &w) : NULL;
+            for (uint64_t j = 0; c && j < w; j++) h = (h ^ c[j]) * 1099511628211ull;
+            if (c) at += snprintf(note + at, sizeof note - at, " %s %llu words %016llx", (const char *[]){"ts", "vs", "gs", "fs"}[i],
+                                  (unsigned long long)w, (unsigned long long)h);
+        }
+    }
+    plat_crash_note(note);
     VkResult r = vkCreateGraphicsPipelines(P.device, P.cache, 1, &pi, NULL, &pipe);
+    plat_crash_note(NULL);
     perf_end(PERF_PIPE, p0);   // counts on the render thread only, so background builds stay out of it
     if (r != VK_SUCCESS) {
         rt_log("vk_pipeline: vkCreateGraphicsPipelines failed (%d)", (int)r);
@@ -3430,12 +3448,26 @@ static void big_cs_worker(void *arg) {
         cs_build_cache = own;
         VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
         cs_build_cache = VK_NULL_HANDLE;
-        if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        // Kept, as lb_compute keeps its pipelines: built again on the replay thread, the driver's cache missed and the game froze for
+        // the whole compile a second time (62 s after big compute shader 31, a 21-minute run).
+        int built = pipe != VK_NULL_HANDLE;
+        if (pipe) {
+            struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
+            uint64_t h = key_hash(&k, sizeof k);
+            plat_mutex_lock(&P.lock);
+            if (!pipe_find(&k, sizeof k, h)) {
+                pipe_add(&k, sizeof k, h, pipe, l, &B, VK_PIPELINE_BIND_POINT_COMPUTE, 0);
+                P.stats.compute++;
+                pipe = VK_NULL_HANDLE;
+            }
+            plat_mutex_unlock(&P.lock);
+            if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        }
         if (own) {
             vkMergePipelineCaches(P.device, P.cache, 1, &own);
             vkDestroyPipelineCache(P.device, own, NULL);
         }
-        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, pipe ? "" : " (failed)");
+        rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, built ? "" : " (failed)");
         __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         next++;
     }
@@ -3528,6 +3560,13 @@ static uint32_t vs_union_peek(const GfxShader *vs, GfxShaderIo fin[32]) {
 }
 
 static void lb_compute(const GfxShader *cs) {
+    // LOCAL TEST (Ocarina): a big shader is left to big_cs_worker (one at a time, its own cache, only once a dispatch needs it).
+    // Here it was built on every prebuild thread at once in the shared cache, including the skipped movie network (up to 7 million
+    // words): on AMD (LLPC) those compiles ran for many minutes, the graphics pipelines waited behind them and the scene after the
+    // intro stayed black (ocarina-recomp #12, #20, #27).
+    uint64_t words = 0;
+    gfx_shader_spirv(cs, &words);
+    if (words >= big_cs_words()) return;
     struct { const GfxShader *cs; uint32_t compute; } k = {cs, 1};
     uint64_t h = key_hash(&k, sizeof k);
     Bindings B = {0};

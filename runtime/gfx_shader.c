@@ -1135,7 +1135,7 @@ static int reflect(GfxShader *s, int flags) {
                 if (*q++ != (i + 1 == n ? ']' : ',')) return 0;
             }
         }
-        if (!nvn2_c0_valid(&s->c0, NVN2_C0_BYTES)) return 0;
+        if (!nvn2_c0_valid(&s->c0, NVN2_C0_LIST)) return 0;   // the same bound the dispatch packs against, so a bad layout fails here
         s->has_c0 = 1;
     }
     if (require_c0 && !s->has_c0) {
