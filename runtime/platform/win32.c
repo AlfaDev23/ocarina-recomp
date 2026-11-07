@@ -615,6 +615,9 @@ static void invalid_parameter(const wchar_t *expr, const wchar_t *func, const wc
 // process ended with no word in the log (issue #12). The last-chance filter names the module and offset, and with
 // OOT_MINIDUMP=<file.dmp> writes a minidump: threads and stacks only, for local debugging. A dump holds game memory, so
 // it is never to be shared publicly.
+static _Thread_local const char *crash_note;
+void plat_crash_note(const char *note) { crash_note = note; }
+
 static LONG WINAPI last_chance(EXCEPTION_POINTERS *ep) {
     uintptr_t rip = (uintptr_t)ep->ExceptionRecord->ExceptionAddress;
     HMODULE m = NULL;
@@ -627,7 +630,20 @@ static LONG WINAPI last_chance(EXCEPTION_POINTERS *ep) {
     if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2)
         fprintf(stderr, ", %s 0x%llx", ep->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading",
                 (unsigned long long)ep->ExceptionRecord->ExceptionInformation[1]);
+    PWSTR tn = NULL;
+    if (SUCCEEDED(GetThreadDescription(GetCurrentThread(), &tn)) && tn) {
+        fprintf(stderr, ", thread name \"%ls\"", tn);
+        LocalFree(tn);
+    }
+    fprintf(stderr, ", working on: %s", crash_note ? crash_note : "(nothing noted)");
     fputc('\n', stderr);
+    // A driver that runs out of memory may crash on a null pointer instead of failing: the commit numbers tell
+    MEMORYSTATUSEX ms = {.dwLength = sizeof ms};
+    PROCESS_MEMORY_COUNTERS_EX pc = {.cb = sizeof pc};
+    if (GlobalMemoryStatusEx(&ms) && GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pc, sizeof pc))
+        fprintf(stderr, "[host] crash: memory: this process %llu MiB private; system RAM %llu of %llu MiB free, commit %llu of %llu MiB free\n",
+                (unsigned long long)(pc.PrivateUsage >> 20), (unsigned long long)(ms.ullAvailPhys >> 20), (unsigned long long)(ms.ullTotalPhys >> 20),
+                (unsigned long long)(ms.ullAvailPageFile >> 20), (unsigned long long)(ms.ullTotalPageFile >> 20));
     fflush(stderr);
     const char *dump = getenv("OOT_MINIDUMP");
     HMODULE dh = dump ? LoadLibraryA("dbghelp.dll") : NULL;

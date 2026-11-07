@@ -2226,7 +2226,21 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
         pi.pVertexInputState = NULL, pi.pInputAssemblyState = NULL;
     }
     uint64_t p0 = perf_begin();
+    static _Thread_local char note[200];   // named in the log if the driver crashes in this create (platform last-chance filter)
+    {
+        const GfxShader *st[4] = {s->ts, s->vs, s->gs, s->fs};
+        int at = snprintf(note, sizeof note, "graphics pipeline, mesh %d task %d:", mesh_vs(s), s->ts != NULL);
+        for (int i = 0; i < 4 && at < (int)sizeof note; i++) {
+            uint64_t w = 0, h = 1469598103934665603ull;   // FNV-1a of the SPIR-V: the same shader across runs
+            const uint32_t *c = st[i] ? gfx_shader_spirv(st[i], &w) : NULL;
+            for (uint64_t j = 0; c && j < w; j++) h = (h ^ c[j]) * 1099511628211ull;
+            if (c) at += snprintf(note + at, sizeof note - at, " %s %llu words %016llx", (const char *[]){"ts", "vs", "gs", "fs"}[i],
+                                  (unsigned long long)w, (unsigned long long)h);
+        }
+    }
+    plat_crash_note(note);
     VkResult r = vkCreateGraphicsPipelines(P.device, P.cache, 1, &pi, NULL, &pipe);
+    plat_crash_note(NULL);
     perf_end(PERF_PIPE, p0);   // counts on the render thread only, so background builds stay out of it
     if (r != VK_SUCCESS) {
         rt_log("vk_pipeline: vkCreateGraphicsPipelines failed (%d)", (int)r);
