@@ -1398,6 +1398,27 @@ static void mirror_create(PoolRec *r) {
                  n / 1048576.0, used / 1048576.0, budget / 1048576.0);
         return refuse(r, MR_BUDGET, why);
     }
+    // Cards of 8 GiB or less give at most an eighth of the device-local heap to mirrors (after NotRexed/Hookshot
+    // c02f290d4): on an RTX 4060 Ti 8 GB mirrors reached 2.8 GiB, the textures spilled to system memory, 2-12 fps
+    // (issue #18). A mirror is a speed-up; the pool works imported. TOTK_MIRROR_MAX_MB overrides (0 = no cap).
+    static int64_t mirror_cap = -1;   // replay thread only
+    if (mirror_cap < 0) {
+        const char *s = cfg_get("TOTK_MIRROR_MAX_MB");
+        uint64_t heap = 0;
+        for (uint32_t h = 0; h < c->mem_props.memoryHeapCount && h < VK_MAX_MEMORY_HEAPS; h++)
+            if (c->mem_props.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT && c->mem_props.memoryHeaps[h].size > heap)
+                heap = c->mem_props.memoryHeaps[h].size;
+        mirror_cap = s && *s ? (int64_t)atoll(s) << 20 : heap && heap <= (8ull << 30) ? (int64_t)(heap / 8) : 0;
+        if (mirror_cap < 0) mirror_cap = 0;
+        rt_log("mem: mirrors capped at %.0f MiB (0 = no cap; device-local heap %.0f MiB)", mirror_cap / 1048576.0,
+               heap / 1048576.0);
+    }
+    if (mirror_cap && m_live_bytes + (int64_t)n > mirror_cap) {
+        char why[128];
+        snprintf(why, sizeof why, "its %.1f MiB mirror passes the mirror cap (%.0f of %.0f MiB mirrored)", n / 1048576.0,
+                 m_live_bytes / 1048576.0, mirror_cap / 1048576.0);
+        return refuse(r, MR_BUDGET, why);
+    }
     plat_mutex_lock(&gen_lock);
     mrep.sync_queries += snap_regions(r0, r1, mepoch);
     int untracked = 0;
