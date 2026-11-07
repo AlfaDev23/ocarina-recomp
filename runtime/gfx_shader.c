@@ -61,8 +61,8 @@ static uint32_t nvn2_shared(const uint8_t *control) {
 #define CODE_SKIP 0x30                                     // graphics code starts after the first 0x30 bytes of the program
 #define BUCKETS 4096
 #define LINE_MAX_LEN 4096
-#define KEY_VERSION 5                                      // in every cache key; bump when the key layout or the use of the
-                                                           // output changes here (5: guarded storage binding contract);
+#define KEY_VERSION 6                                      // in every cache key; bump when the key layout or the use of the
+                                                           // output changes here (6: non-overlapping c0 candidate list);
                                                            // translator changes are covered by its identity
 #define IN_VERSION 1                                       // legacy input-ID schema and non-GS .in storage version
 #define USE_MAGIC 0x4d554b54u                              // "TKUM", .use files
