@@ -2754,11 +2754,15 @@ static struct {
 // built the pipeline and appended by the present thread (vk_pipeline_autosave) or at exit (vk_pipeline_save). A file
 // with another magic, version or record size is ignored and rewritten. Bump KEYS_VERSION when VkPipeState or the
 // record changes meaning without changing size.
-#define KEYS_VERSION 3                 // 3: shaders named by input id (gfx_shader.c)
+#define KEYS_VERSION 4                 // 3: shaders named by input id (gfx_shader.c); 4: the task stage too
 typedef struct { char magic[8]; uint32_t version, rec_size; } KeysHeader;
 typedef struct {
     uint8_t vs[32], fs[32];            // gfx_shader_input_id of each stage; fs all zero with has_fs 0
     uint32_t has_fs, pad;
+    // LOCAL TEST (Ocarina): a mesh pipeline's task stage (vs holds the mesh stage). Mesh pipelines were left out, and the
+    // Deku Tree scene still built them on a first start after the shader preparation (8.4 s).
+    uint8_t ts[32];
+    uint32_t has_ts, pad2;
     // Frozen two-stage prefix. Adding the experimental GS pointer must not
     // change existing version-3 records or reinterpret their bytes at boot.
     _Alignas(VkPipeState) uint8_t state[offsetof(VkPipeState, gs)];
@@ -2815,15 +2819,16 @@ static void rec_fill(KeyRec *r, const VkPipeState *s) {
     memset(r, 0, sizeof *r);
     memcpy(r->vs, gfx_shader_input_id(s->vs), 32);
     if (s->fs) memcpy(r->fs, gfx_shader_input_id(s->fs), 32), r->has_fs = 1;
+    if (s->ts) memcpy(r->ts, gfx_shader_input_id(s->ts), 32), r->has_ts = 1;
     VkPipeState legacy = *s;
-    legacy.vs = legacy.fs = legacy.gs = NULL;
+    legacy.vs = legacy.fs = legacy.gs = legacy.ts = NULL;
     legacy.prim_restart = 0;   // dynamic state: the same pipeline either way
     memcpy(r->state, &legacy, sizeof r->state);
 }
 
 // A pipeline was built for a draw: queue its record for the file. Caller holds P.lock.
 static void keys_note(const VkPipeState *s) {
-    if (s->gs || mesh_vs(s) || !A.on || !K.path[0]) return;             // GS prewarm records need a future explicit format
+    if (s->gs || !A.on || !K.path[0]) return;             // GS prewarm records need a future explicit format
     KeyRec r;
     rec_fill(&r, s);
     if (!seen_add(rec_hash(&r))) return;
@@ -3358,8 +3363,8 @@ void vk_pipeline_prewarm(void) {
     }
     const KeyRec *r = (const KeyRec *)K.file;
     size_t n = K.file_n, m = 0;
-    uint8_t (*ids)[32] = malloc(2 * n * 32);
-    const GfxShader **sh = calloc(2 * n, sizeof *sh);
+    uint8_t (*ids)[32] = malloc(3 * n * 32);
+    const GfxShader **sh = calloc(3 * n, sizeof *sh);
     if (!ids || !sh) {
         free(ids), free(sh);
         return;
@@ -3367,6 +3372,7 @@ void vk_pipeline_prewarm(void) {
     for (size_t i = 0; i < n; i++) {
         memcpy(ids[m++], r[i].vs, 32);
         if (r[i].has_fs) memcpy(ids[m++], r[i].fs, 32);
+        if (r[i].has_ts) memcpy(ids[m++], r[i].ts, 32);
     }
     qsort(ids, m, 32, id_cmp);
     size_t u = 0;
@@ -3399,22 +3405,23 @@ void vk_pipeline_prewarm(void) {
     for (size_t i = 0; i < n; i++) {
         const uint8_t (*v)[32] = bsearch(r[i].vs, ids, u, 32, id_cmp);
         const uint8_t (*f)[32] = r[i].has_fs ? bsearch(r[i].fs, ids, u, 32, id_cmp) : NULL;
-        const GfxShader *vs = v ? sh[v - ids] : NULL, *fs = f ? sh[f - ids] : NULL;
-        if (!vs || (r[i].has_fs && !fs)) {
+        const uint8_t (*tq)[32] = r[i].has_ts ? bsearch(r[i].ts, ids, u, 32, id_cmp) : NULL;
+        const GfxShader *vs = v ? sh[v - ids] : NULL, *fs = f ? sh[f - ids] : NULL, *ts = tq ? sh[tq - ids] : NULL;
+        if (!vs || (r[i].has_fs && !fs) || (r[i].has_ts && !ts)) {
             dropped++;
             continue;
         }
         if (A.on && vk_caps.amd) {
             // Let the draw queue compile large shaders on demand. AMD can
             // spend minutes on one of these, blocking the startup join.
-            if (graphics_shader_words(vs) + graphics_shader_words(fs) >= 60000) {
+            if (graphics_shader_words(vs) + graphics_shader_words(fs) + graphics_shader_words(ts) >= 60000) {
                 deferred++;
                 continue;
             }
         }
         VkPipeState s = {0};
         memcpy(&s, r[i].state, sizeof r[i].state);
-        s.vs = vs, s.fs = fs;
+        s.vs = vs, s.fs = fs, s.ts = ts;
         GKey k;
         gkey_fill(&s, &k);
         pr_hist[(k.clamp & 1) | (k.poly_mode & 3) << 1 | (k.minus_w & 1) << 3]++;
