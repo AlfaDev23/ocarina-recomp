@@ -357,7 +357,8 @@ PlatFiber *plat_fiber_new(size_t stack, void (*fn)(void *arg), void *arg) {
     mprotect(m, 4096, PROT_NONE);
     f->stack = m, f->size = stack;
     uint64_t *top = (uint64_t *)(((uintptr_t)m + stack) & ~(uintptr_t)15);
-    uint64_t *sp = top - 10;   // fpu state (2 words), r15, r14, r13, r12, rbx, rbp, return address, padding
+    // plat_fiber_entry starts at top - 16, so rsp is 16-aligned at its call, as the System V ABI wants.
+    uint64_t *sp = top - 11;   // fpu state (2 words), r15, r14, r13, r12, rbx, rbp, return address, padding (2)
     sp[0] = 0x037f;            // x87 control word: the default
     sp[1] = 0x1f80;            // MXCSR: the default
     sp[2] = sp[3] = 0;         // r15, r14
