@@ -47,7 +47,7 @@ static const uint32_t (*c0_push)[NVN2_ROOT_WORDS];
 #define NVN_STAGE_GS 2
 #define NVN_STAGE_CS 5
 static uint8_t geometry_input;                              // normalized actual draw primitive; zero outside opt-in GS
-#define ONESHOT_WAIT_MS 1000u   /* LOCAL TEST (Ocarina): was 30000; a pipeline with guarded candidates compiles for a minute, and the game froze that long */ //   // prepare_draw: how long a one-shot draw waits for its pipeline before it is skipped
+#define ONESHOT_WAIT_MS 1000u   // Per one-shot draw, shared across the frame on AMD.
 
 static void c0_lay_set(VkExec *ex, const GfxShader *cs) {
     c0_lay = gfx_shader_c0_layout(cs);
@@ -3046,20 +3046,26 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     int pending;
     // A draw of at most 6 vertices over half the render area or more (a full-screen triangle or quad, a tile) waits for
     // its pipeline: skipping it can leave a black tile. The waits share 50 ms per presented frame
-    // (TOTK_PIPE_SKIP=fullscreen skips them instead). A one-shot draw waits without that budget. Everything else is
+    // (TOTK_PIPE_SKIP=fullscreen skips them instead). On AMD one-shot draws share a separate budget. Everything else is
     // skipped while its pipeline is built.
-    static uint64_t wait_frame;
+    static uint64_t wait_frame = UINT64_MAX;
     static uint64_t wait_left_ns;
-    uint32_t wait_ms = 0;
-    uint64_t t0 = 0;
-    if (oneshot > 0) {
-        wait_ms = ONESHOT_WAIT_MS;
-    } else if (skip < 2 && count <= 6 && (uint64_t)sc.extent.width * sc.extent.height * 2 >= (uint64_t)ex->pass_w * ex->pass_h) {
-        uint64_t f = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
-        if (f != wait_frame) wait_frame = f, wait_left_ns = 50000000;
-        wait_ms = (uint32_t)(wait_left_ns / 1000000);
-        if (wait_ms) t0 = kern_now_ns();
+    static uint64_t oneshot_left_ns;
+    uint64_t frame = __atomic_load_n(&gfx_counters.frames, __ATOMIC_RELAXED);
+    if (frame != wait_frame) {
+        wait_frame = frame;
+        wait_left_ns = 50000000;
+        oneshot_left_ns = ONESHOT_WAIT_MS * 1000000ull;
     }
+    uint64_t *budget_ns = NULL;
+    uint32_t wait_ms = 0;
+    if (oneshot > 0) {
+        if (vk_caps.amd) budget_ns = &oneshot_left_ns;
+        else wait_ms = ONESHOT_WAIT_MS;
+    } else if (skip < 2 && count <= 6 && (uint64_t)sc.extent.width * sc.extent.height * 2 >= (uint64_t)ex->pass_w * ex->pass_h) {
+        budget_ns = &wait_left_ns;
+    }
+    if (budget_ns) wait_ms = (uint32_t)(*budget_ns / 1000000);
     // The previous draw's pipeline while its state repeats (PM, TOTK_PIPE_MEMO=0 turns it off): the cache key is made
     // from the state alone, and a pipeline once found only changes from its fast link to its optimised build, read
     // from the info the cache entry keeps.
@@ -3070,18 +3076,24 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         info = PM.info, pending = 0;
         p = __atomic_load_n(&info->pipeline, __ATOMIC_ACQUIRE);
     } else {
-        w0 = t0 ? t0 : wait_ms ? kern_now_ns() : 0;   // the clock is read only for draws that may wait
+        w0 = wait_ms ? kern_now_ns() : 0;
         p = vk_pipeline_graphics_async(&s, &info, &pending, wait_ms);
-        if (t0) {
-            uint64_t spent = kern_now_ns() - t0;
-            wait_left_ns = spent < wait_left_ns ? wait_left_ns - spent : 0;
+        if (w0 && budget_ns) {
+            uint64_t spent = kern_now_ns() - w0;
+            *budget_ns = spent < *budget_ns ? *budget_ns - spent : 0;
         }
         why = oneshot > 0 ? "one-shot, shader" : wait_ms ? "full-screen" : NULL;
-        if (pending && oneshot < 0 && !vk_exec_targets_recent(ex, skip >= 1)) {
+        uint32_t oneshot_wait_ms = vk_caps.amd ? (uint32_t)(oneshot_left_ns / 1000000) : ONESHOT_WAIT_MS;
+        if (pending && oneshot < 0 && oneshot_wait_ms && !vk_exec_targets_recent(ex, skip >= 1)) {
             perf_count(PERF_CNT_ONESHOT_WAIT);
             why = "one-shot";
-            if (!w0) w0 = kern_now_ns();
-            p = vk_pipeline_graphics_async(&s, &info, &pending, ONESHOT_WAIT_MS);
+            uint64_t start = kern_now_ns();
+            if (!w0) w0 = start;
+            p = vk_pipeline_graphics_async(&s, &info, &pending, oneshot_wait_ms);
+            if (vk_caps.amd) {
+                uint64_t spent = kern_now_ns() - start;
+                oneshot_left_ns = spent < oneshot_left_ns ? oneshot_left_ns - spent : 0;
+            }
         }
         PM.valid = !pending && p && info;
         if (PM.valid) PM.s = s, PM.info = info;
