@@ -24,6 +24,7 @@ $script:proc = $null
 
 $DICAS = @(
     (L 'Um miojo fica pronto em 3 minutos. Isto aqui leva um pouco mais.' 'Instant noodles take 3 minutes. This takes a little longer.'),
+    (L 'A barra quase parada não é travamento: enquanto o relógio acima andar, está tudo funcionando.' 'A nearly still bar is not a freeze: while the clock above moves, everything is working.'),
     (L 'Pode usar o PC enquanto instala, só vai ficar um pouco mais lento.' 'You can use your PC during the install, it will just be a little slower.'),
     (L 'Não precisa olhar: quando terminar, o botão Jogar aparece aqui.' 'No need to watch: the Play button shows up here when it is done.'),
     (L 'Se fechar ou faltar luz, é só abrir o instalador de novo: ele continua de onde parou.' 'If it closes or the power goes out, just open the installer again: it picks up where it stopped.'),
@@ -157,7 +158,9 @@ function Atualizar() {
     }
     $total = $script:feito + $script:pesoAtual * $frac
     $barra.Value = [Math]::Min(1000, [int](1000 * $total))
-    $lbPct.Text = (L '{0:0}% concluído' '{0:0}% done') -f (100 * $total)
+    $minutos = [int][Math]::Floor(([DateTime]::Now - $script:passoIni).TotalMinutes)
+    $segundos = ([DateTime]::Now - $script:passoIni).Seconds
+    $lbPct.Text = (L '{0:0}% concluído. Nesta etapa há {1} min {2:00} s.' '{0:0}% done. On this step for {1} min {2:00} s.') -f (100 * $total), $minutos, $segundos
     $dica = [int]([long]([DateTime]::Now.Ticks / 250000000) % $DICAS.Count)
     $lbDica.Text = $DICAS[$dica]
     [Windows.Forms.Application]::DoEvents()
@@ -278,7 +281,7 @@ $PASSOS = @(
     @((L 'Copiar as ferramentas' 'Copy the tools'), 3, 'P-Copiar'),
     @((L 'Conferir o seu jogo' 'Check your game'), 2, 'P-Exefs'),
     @((L 'Converter o código do jogo' 'Convert the game code'), 2, 'P-Gerar'),
-    @((L 'Preparar os arquivos do jogo' 'Prepare the game files'), 25, 'P-Romfs'),
+    @((L 'Preparar os arquivos do jogo (pode levar mais de 1 hora em HD)' 'Prepare the game files (can take over 1 hour on a hard drive)'), 25, 'P-Romfs'),
     @((L 'Compilar o jogo (a parte mais demorada)' 'Build the game (the longest part)'), 35, 'P-Exe'),
     @((L 'Criar o atalho' 'Create the shortcut'), 1, 'P-Finalizar')
 )
