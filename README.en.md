@@ -58,7 +58,7 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\path\your-game
 
 - The scripts do not ask for administrator. Installing the tools may: the installer does that for you, and in the other ways you run it yourself.
 - It writes only inside the project folder, and never changes your game file.
-- It downloads the Python packages (`tools\requirements.txt`), the shader translator's .NET packages and, if the game's executable is compressed, [zbic](https://github.com/kinnay/zbic).
+- It downloads the Python packages (`tools\requirements-build.txt`), the shader translator's .NET packages and, if the game's executable is compressed, [zbic](https://github.com/kinnay/zbic).
 - To uninstall, delete the project folder. The tools from step 1 are removed through Windows' apps panel.
 
 It takes 30 minutes to 2 hours, and you can use your PC in the meantime. To update, run the installer again or see the end of the guide.
