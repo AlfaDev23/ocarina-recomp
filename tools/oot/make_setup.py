@@ -129,6 +129,9 @@ def build_python(tools):
     run([sys.executable, '-m', 'pip', 'install', '-q', '--disable-pip-version-check', '--target', py / 'Lib' / 'site-packages', '--python-version', '3.14',
          '--implementation', 'cp', '--abi', 'cp314', '--platform', 'win_amd64', '--only-binary', ':all:', 'numpy==2.5.4', 'lz4==4.4.5'])
     shutil.rmtree(py / 'Lib' / 'site-packages' / 'bin', ignore_errors=True)
+    # numpy's tests and pip's compiled files are not used, and their long paths can break unpacking the ZIP in a long folder
+    for d in list((py / 'Lib' / 'site-packages').rglob('tests')) + list((py / 'Lib' / 'site-packages').rglob('__pycache__')):
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def build_llvm(tools):
@@ -219,6 +222,8 @@ def main():
     env = dict(os.environ, PATH=f'{msys};{os.environ["PATH"]}')
     run(['sh', ROOT / 'instalador' / 'build_exe.sh'], env=env)
     shutil.copy2(ROOT / 'instalador' / 'Instalar-Ocarina.exe', folder / 'Instalar-Ocarina.exe')
+    longest = max((p.relative_to(folder).as_posix() for p in folder.rglob('*')), key=len)
+    print(f'longest path inside the folder: {len(longest)} characters: {longest}')
     size = sum(f.stat().st_size for f in folder.rglob('*') if f.is_file())
     print(f'{folder}: {size / (1 << 20):.0f} MiB')
     if not args.no_zip:

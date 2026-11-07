@@ -166,6 +166,7 @@ function Atualizar() {
     [Windows.Forms.Application]::DoEvents()
 }
 
+Add-Type -Namespace Ocarina -Name Espera -MemberDefinition '[DllImport("kernel32.dll")] public static extern void Sleep(uint ms);'
 function Exec([string]$exe, [string[]]$argumentos, [switch]$PodeFalhar, [string]$Saida) {
     # the full path: cmd.exe does not have to search PATH for it
     if ($exe -notmatch '\\') {
@@ -187,7 +188,9 @@ function Exec([string]$exe, [string[]]$argumentos, [switch]$PodeFalhar, [string]
             & taskkill.exe /T /F /PID $script:proc.Id 2>&1 | Out-Null
             throw 'CANCELADO'
         }
-        Start-Sleep -Milliseconds 150
+        # kernel32 Sleep, not Start-Sleep: a managed wait on this STA thread pumps messages itself and loses window commands,
+        # so a window could not be minimized or restored during a step
+        foreach ($n in 1..3) { [Ocarina.Espera]::Sleep(50); [Windows.Forms.Application]::DoEvents() }
     }
     $cod = $script:proc.ExitCode
     if ($cod -ne 0 -and -not $PodeFalhar) { throw (L "O programa '$([IO.Path]::GetFileName($exe))' falhou (código $cod)." "The program '$([IO.Path]::GetFileName($exe))' failed (code $cod).") }

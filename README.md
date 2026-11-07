@@ -38,8 +38,8 @@ O jogo não vem pronto: ele é compilado no seu PC, a partir da sua cópia. Esco
 
 Para desinstalar, apague a pasta de instalação. Prefere conferir antes? O executável só abre o [script do instalador](instalador/Instalar-Ocarina.ps1), e o [código dele](instalador/launcher.c) tem poucas linhas. A página de versões traz o SHA-256 do arquivo. Antivírus às vezes reclamam de programas sem assinatura.
 
-> [!WARNING]
-> **Evite minimizar a janela do instalador:** em alguns casos ela não volta. Se acontecer, feche pelo Gerenciador de Tarefas e abra o instalador de novo, que ele continua de onde parou. A etapa "Preparar os arquivos do jogo" é lenta, principalmente em HD: enquanto o relógio da janela andar, está funcionando.
+> [!NOTE]
+> A etapa "Preparar os arquivos do jogo" é lenta, principalmente em HD: enquanto o relógio da janela andar, está funcionando.
 
 **2. Com os scripts, que você pode ler antes de rodar** (instale antes as ferramentas do passo 1 do [guia](docs/compilar-manual.md)):
 

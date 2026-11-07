@@ -38,8 +38,8 @@ The game does not come ready-made: it is built on your PC from your copy. Choose
 
 To uninstall, delete the install folder. Want to check first? The executable only opens the [installer script](instalador/Instalar-Ocarina.ps1), and [its code](instalador/launcher.c) is a few lines long. The releases page lists the file's SHA-256. Antivirus programs sometimes complain about unsigned programs.
 
-> [!WARNING]
-> **Avoid minimizing the installer window:** in some cases it does not come back. If that happens, close it in Task Manager and open the installer again: it continues from where it stopped. The "Prepare the game files" step is slow, especially on a hard drive: while the clock in the window moves, it is working.
+> [!NOTE]
+> The "Prepare the game files" step is slow, especially on a hard drive: while the clock in the window moves, it is working.
 
 **2. With the scripts, which you can read before running** (first install the tools from step 1 of the [guide](docs/build-by-hand.md)):
 
