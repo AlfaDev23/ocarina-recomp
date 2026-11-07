@@ -199,7 +199,7 @@ function Ferramenta($sub) { return Join-Path $script:pasta "ferramentas\$sub" }
 function AtualizarPath() {
     $win = $env:SystemRoot
     $env:PATH = "$(Ferramenta 'bin');$(Ferramenta 'llvm\bin');$win\System32;$win;$win\System32\Wbem;$win\System32\WindowsPowerShell\v1.0"
-    $env:PYTHONUTF8 = '1'
+    $env:PYTHONUTF8 = '1'; $env:PYTHONUNBUFFERED = '1'   # progress reaches the log as it happens, not in big blocks
 }
 # ---- os passos: nome, minutos estimados e o que fazem
 function P-Copiar() {
