@@ -3599,7 +3599,9 @@ static void op_draw_mesh_ind(VkExec *ex, const p_draw_mesh_ind *d) {
 // lost the device on an RTX 5090 (an invalid instruction pointer, the same address in every run). Such a giant is replaced
 // (this NVN 2 stage only) by a blit from its largest sampled texture to the image it writes. 1 when it was. ponytail: bilinear, not the game's
 // filter; lower the shader's size instead when that is understood. TOTK_BIG_CS=0 runs it.
-static int big_compute_blit(VkExec *ex, const GfxShader *cs, const VkPipeInfo *info) {
+// Takes no pipeline: this shader is the biggest of the game (1.4 million SPIR-V words), and waiting for it to compile left every
+// scene black for minutes on a first run (issue #7).
+static int big_compute_blit(VkExec *ex, const GfxShader *cs) {
     uint64_t words = 0;
     gfx_shader_spirv(cs, &words);
     const uint8_t *bctl, *bcode = NULL;
@@ -3612,19 +3614,21 @@ static int big_compute_blit(VkExec *ex, const GfxShader *cs, const VkPipeInfo *i
     }
     if (!on) return 0;
     const VkTexImage *src = NULL, *dst = NULL;
-    for (uint32_t i = 0; i < info->n_bindings; i++) {
-        const VkPipeBinding *bd = &info->bindings[i];
-        if (!bd->res || (bd->kind != GFX_RES_TEX && bd->kind != GFX_RES_IMG)) continue;
-        int slot = bd->res->slot, img = bd->kind == GFX_RES_IMG;
-        uint64_t h = img ? (slot >= 0 && slot < 32 ? ex->img[5][slot] : 0) : (slot >= 0 && slot < 128 ? ex->tex[5][slot] : 0);
-        view_t v;
-        int hv = 0;
-        const VkTexImage *t = h ? vk_texture_by_id(&ex->tex_pool, (int)(h & 0xfffff), &v, &hv) : NULL;
-        if (!t) continue;
-        if (img && (bd->res->flags & 4)) dst = t;
-        else if (!img && t->type == VK_IMAGE_TYPE_2D && !(t->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) &&
-                 (!src || (uint64_t)t->width * t->height > (uint64_t)src->width * src->height))
-            src = t;
+    for (int img = 0; img < 2; img++) {
+        const GfxShaderRes *r;
+        int n = gfx_shader_resources(cs, img ? GFX_RES_IMG : GFX_RES_TEX, &r);
+        for (int i = 0; i < n; i++) {
+            int slot = r[i].slot;
+            uint64_t h = img ? (slot >= 0 && slot < 32 ? ex->img[5][slot] : 0) : (slot >= 0 && slot < 128 ? ex->tex[5][slot] : 0);
+            view_t v;
+            int hv = 0;
+            const VkTexImage *t = h ? vk_texture_by_id(&ex->tex_pool, (int)(h & 0xfffff), &v, &hv) : NULL;
+            if (!t) continue;
+            if (img && (r[i].flags & 4)) dst = t;
+            else if (!img && t->type == VK_IMAGE_TYPE_2D && !(t->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) &&
+                     (!src || (uint64_t)t->width * t->height > (uint64_t)src->width * src->height))
+                src = t;
+        }
     }
     static int logged;
     if (!logged) {
@@ -3819,11 +3823,11 @@ static void op_dispatch(VkExec *ex, const p_dispatch *d) {
             return;
         }
     }
+    if (big_compute_blit(ex, cs)) return;
     if (!vk_pipeline_compute_ready(cs)) return;
     const VkPipeInfo *info = NULL;
     VkPipeline p = vk_pipeline_compute(cs, &info);
     if (!p || !info) return warn_once(W_PIPELINE, "a compute pipeline could not be created: dispatches with it are skipped");
-    if (big_compute_blit(ex, cs, info)) return;
     vk_exec_barrier(ex);   // ends the pass; earlier writes are visible to the shader
     bind_pipeline(ex, VK_PIPELINE_BIND_POINT_COMPUTE, p);
     c0_dim[0] = (uint32_t)d->x, c0_dim[1] = (uint32_t)d->y, c0_dim[2] = (uint32_t)d->z;
