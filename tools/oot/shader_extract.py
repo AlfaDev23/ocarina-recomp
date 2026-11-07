@@ -2,9 +2,13 @@
 
     .venv\\Scripts\\python -I tools\\oot\\shader_extract.py --romfs-image romfs.bin --index index.json --out <dir>
     .venv\\Scripts\\python -I tools\\oot\\shader_extract.py --romfs-image romfs.bin --index index.json --check <dump dir>
+    .venv\\Scripts\\python -I tools\\oot\\shader_extract.py --romfs-image romfs.bin --index index.json --pack <file>
 
 --out writes each stage as <fnv>.ctl (control section) and <fnv>.bin (code), the names and bytes DKB_SHADER_DUMP gives
-(runtime/gfx_shader.c gfx_shader_nvn2_hash). --check compares against such a dump and prints counts only. The output
+(runtime/gfx_shader.c gfx_shader_nvn2_hash). --pack writes them all to one file instead, the input of
+ocarina.exe --lower-stages (gfx_shader.c gfx_shader_lower_stages): "OOTSTGPK", version 1, count (u32 each), then per
+stage control size, code size (u32 each), control, code; one file, as Windows Defender once quarantined a loose .bin.
+--check compares against such a dump and prints counts only. The output
 is game data: it stays on the player's PC and never goes into the repository.
 
 Containers (decompressed with zstd, dictionaries from Pack/ZsDic.pack.zs; SARC archives opened member by member):
@@ -180,6 +184,7 @@ def main():
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--out')
     g.add_argument('--check', metavar='DUMPDIR')
+    g.add_argument('--pack', metavar='FILE')
     a = ap.parse_args()
     t = time.time()
     stages = extract(a.romfs_image, a.index)
@@ -189,6 +194,10 @@ def main():
         for h, (ctl, code) in stages.items():
             for ext, b in (('ctl', ctl), ('bin', code)):
                 with open(os.path.join(a.out, f'{h:016x}.{ext}'), 'wb') as f: f.write(b)
+    elif a.pack:
+        with open(a.pack, 'wb') as f:
+            f.write(b'OOTSTGPK' + struct.pack('<II', 1, len(stages)))
+            for ctl, code in stages.values(): f.write(struct.pack('<II', len(ctl), len(code)) + ctl + code)
     else:
         dumped = {int(n[:-4], 16) for n in os.listdir(a.check) if n.endswith('.ctl')}
         print(f'dump {len(dumped)}, reproduced {len(dumped & stages.keys())}, missing {len(dumped - stages.keys())}')
