@@ -292,6 +292,13 @@ function Explicar($erro) {
     return (L "$erro`n`nAbra o instalador de novo: muitas vezes ele resolve sozinho. Se repetir, abra um pedido de ajuda no GitHub do projeto com o registro da instalação." "$erro`n`nOpen the installer again: this often fixes it. If it happens again, open an issue on the project's GitHub with the install log.")
 }
 
+function FimDoRegistro() {
+    try {
+        $linhas = Get-Content -LiteralPath $LOG -Tail 8 -ErrorAction Stop | Where-Object { $_.Trim() } | ForEach-Object { if ($_.Length -gt 110) { $_.Substring(0, 110) } else { $_ } }
+        return "`n`n" + (L 'Últimas linhas do registro:' 'Last lines of the log:') + "`n" + ($linhas -join "`n")
+    } catch { return '' }
+}
+
 function Instalar() {
     $tela1.Visible = $false; $tela2.Visible = $true
     $script:rodando = $true
@@ -304,6 +311,7 @@ function Instalar() {
             $lista.Items[$i] = " >  $($p[0])..."
             $script:passoIni = [DateTime]::Now; $script:estimativa = $p[1]; $script:pesoAtual = $p[1] / $total
             Registrar "=== $($p[0])"
+            $script:passoNome = $p[0]
             if ($i -ge 3 -or (Test-Path $script:pasta)) { if (Test-Path $script:pasta) { Set-Location $script:pasta } }
             & $p[2]
             $script:feito += $script:pesoAtual
@@ -324,7 +332,7 @@ function Instalar() {
         $lbPct.Text = (L 'A instalação parou.' 'The installation stopped.')
         $btFechar.Visible = $true
         if ($env:OCARINA_AUTO) { $form.Close(); return }
-        $r = [Windows.Forms.MessageBox]::Show((Explicar $msg) + (L "`n`nQuer ver o registro da instalação?" "`n`nDo you want to see the install log?"), 'Ocarina Recomp', 'YesNo', 'Warning')
+        $r = [Windows.Forms.MessageBox]::Show((L "Etapa: $($script:passoNome)" "Step: $($script:passoNome)") + "`n`n" + (Explicar $msg) + (FimDoRegistro) + (L "`n`nQuer ver o registro da instalação?" "`n`nDo you want to see the install log?"), 'Ocarina Recomp', 'YesNo', 'Warning')
         if ($r -eq 'Yes') { Start-Process notepad.exe $LOG }
     }
 }
