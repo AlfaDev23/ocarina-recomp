@@ -229,6 +229,7 @@ function OpcoesNup() {
 function P-Exefs() {
     $exefs = Build 'exefs'
     if ((Test-Path "$exefs\main") -and (Get-FileHash "$exefs\main").Hash -eq $HASH_MAIN) { return }
+    if (-not $script:jogo) { throw 'VERSAO' }
     $origem = $null
     if ($script:jogoNup) {
         OpcoesNup
@@ -344,6 +345,8 @@ function Instalar() {
 }
 
 # ---- tela 1: logica
+# An install that already has the game's files: it needs neither the game file nor the long steps again.
+function JaInstalada($d) { return (Test-Path -LiteralPath (Join-Path $d 'build\romfs\index.json')) -and (Test-Path -LiteralPath (Join-Path $d 'build\exefs\main')) }
 function PastaPadrao() {
     $livre = { param($d) [Math]::Floor((Get-PSDrive $d).Free / 1GB) }
     if ((& $livre 'C') -ge $GB_NECESSARIOS) { return 'C:\OcarinaRecomp' }
@@ -359,9 +362,12 @@ function Validar() {
     elseif (-not $parcial -and $livre -lt $GB_NECESSARIOS) { $problema += (L "Faltam $($GB_NECESSARIOS - $livre) GB livres em ${unid}: (precisa de $GB_NECESSARIOS GB)." "You need $($GB_NECESSARIOS - $livre) GB more free on ${unid}: ($GB_NECESSARIOS GB required).") }
     $lbPasta.Text = (L "$($script:pasta)   ($livre GB livres)" "$($script:pasta)   ($livre GB free)")
     $lbAviso.Text = ($problema + $script:avisos) -join "`n"
-    $btInstalar.Enabled = ($problema.Count -eq 0) -and [bool]$script:jogo -and -not $script:bloqueio
+    $pronta = JaInstalada $script:pasta
+    if ($pronta -and -not $script:jogo) { $lbJogo.Text = (L 'Esta pasta já tem os arquivos do jogo convertidos: não precisa escolher o jogo de novo.' 'This folder already has the converted game files: no need to choose the game again.'); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen }
+    $btInstalar.Enabled = ($problema.Count -eq 0) -and ([bool]$script:jogo -or $pronta) -and -not $script:bloqueio
 }
 function EscolherJogo([string]$c) {
+    if ((Test-Path -LiteralPath $c -PathType Container) -and (JaInstalada $c)) { $script:pasta = $c; $script:jogo = $null; Validar; return }
     # -LiteralPath: game files are often named with [title id], and [ ] are wildcards to the plain -Path
     if ($c -match '\.nup$' -and (Test-Path -LiteralPath $c -PathType Leaf)) {
         $script:jogo = $c; $script:jogoNup = $true
@@ -391,7 +397,11 @@ $btPasta.add_Click({
 $btTrocar.add_Click({
     $d = New-Object Windows.Forms.FolderBrowserDialog
     $d.Description = (L 'Escolha onde instalar (sem espaços nem acentos no caminho)' 'Choose where to install (no spaces or accents in the path)')
-    if ($d.ShowDialog($form) -eq 'OK') { $script:pasta = Join-Path $d.SelectedPath 'OcarinaRecomp'; Validar }
+    if ($d.ShowDialog($form) -eq 'OK') {
+        $sel = $d.SelectedPath
+        $script:pasta = if ((JaInstalada $sel) -or (Split-Path $sel -Leaf) -eq 'OcarinaRecomp') { $sel } else { Join-Path $sel 'OcarinaRecomp' }
+        Validar
+    }
 })
 $btInstalar.add_Click({ Instalar })
 $btJogar.add_Click({
