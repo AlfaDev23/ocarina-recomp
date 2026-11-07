@@ -254,7 +254,7 @@ function P-Compilador() {
         Exec $bash @('-lc', 'pacman -Syuu --noconfirm') -PodeFalhar | Out-Null
         Exec $bash @('-lc', 'pacman -Syuu --noconfirm') -PodeFalhar | Out-Null
     }
-    Exec $bash @('-lc', 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip') | Out-Null
+    Exec $bash @('-lc', 'pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,dav1d,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip') | Out-Null
     AtualizarPath
     $env:PYTHONUTF8 = '1'
 }

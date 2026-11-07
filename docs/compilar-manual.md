@@ -26,7 +26,7 @@ Feche e abra o PowerShell. Depois instale o compilador. O primeiro comando pode 
 $env:MSYSTEM = "UCRT64"; $env:CHERE_INVOKING = "1"
 C:\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm"
 C:\msys64\usr\bin\bash.exe -lc "pacman -Syuu --noconfirm"
-C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip"
+C:\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-{clang,lld,ninja,gcc,make,pkgconf,sdl3,opus,libvpx,dav1d,zstd,vulkan-devel,vulkan-memory-allocator,vulkan-validation-layers,shaderc,spirv-tools} base-devel git unzip"
 ```
 
 ## 2. Baixe o código
