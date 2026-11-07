@@ -321,9 +321,19 @@ function P-Romfs() {
     }
 }
 function P-Exe() {
+    # A new version recompiles the runtime: the copied sources keep the ZIP's dates, which can be older than the last build's
+    # objects, and Ninja then kept a runtime that did not match the new generated code (FATAL: cfg: ... no row).
+    $versao = (Get-Content -LiteralPath (Join-Path $script:pasta 'VERSION') -Raw).Trim()
+    $marca = Build 'oot111\versao-compilada.txt'
+    $antes = if (Test-Path -LiteralPath $marca) { (Get-Content -LiteralPath $marca -Raw).Trim() } else { '' }
+    if ($antes -ne $versao) {
+        $objRt = Build 'oot111\obj\runtime'
+        if (Test-Path -LiteralPath $objRt) { Registrar "versão ${antes} -> ${versao}: o runtime é recompilado"; Remove-Item -LiteralPath $objRt -Recurse -Force }
+    }
     $ramGb = [Math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
     $jobs = [Math]::Max(2, [Math]::Min([Environment]::ProcessorCount, [int]($ramGb / 3)))
     Exec $script:py @('tools\build_game.py', '--version', 'oot111', '--gen', 'generated\oot111', '--out', (Build 'oot111'), '--expected', 'tools\data\expected-oot111.json', '--exefs', (Build 'exefs'), '--romfs', (Build 'romfs'), '--jobs', "$jobs", '--toolchain', (Ferramenta 'llvm'), '--deps', (Ferramenta 'deps'), '--ninja', (Ferramenta 'bin\ninja.exe')) | Out-Null
+    Set-Content -LiteralPath $marca -Value $versao -Encoding ascii
 }
 # Shader preparation: the player's own shaders, extracted from the game files, lowered and translated for the variants
 # our seed lists (tools/data/oot-seed, answers and pipeline keys recorded in play), so a first start does not stop to

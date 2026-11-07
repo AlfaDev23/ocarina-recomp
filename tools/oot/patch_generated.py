@@ -40,7 +40,7 @@ FIXED_RES = r'''/* Fixed 3D resolution (OOT_RESOLUTION in the ini, TOTK_OOT_RESO
    runs 30 frames first: it also writes fields the rest of the frame reads (+8, +16, +168), and the fixed path taken
    from the first frame left them unset and the 3D black. After NotRexed/Hookshot c02f290d47ff (nx2/oot_patches.py,
    host/nn_vi.c, GPL-3.0). "auto": the game's own; a percentage 25..200 (above 100 untested). */
-extern const char *cfg_value(const char *);
+extern const char *cfg_get(const char *);
 extern unsigned cfg_version(void);
 extern void rt_log(const char *, ...);
 extern double strtod(const char *, char **);
@@ -52,7 +52,9 @@ static int oot_fixed_res(void) {
     unsigned v = cfg_version();
     if (v != seen) {
         seen = v;
-        const char *s = cfg_value("TOTK_OOT_RESOLUTION");
+        // cfg_get, not cfg_value: a runtime built before the setting existed has no table row, and cfg_value made that fatal
+        const char *s = cfg_get("TOTK_OOT_RESOLUTION");
+        if (!s || !*s) s = "auto";
         char *end;
         double pct = strtod(s, &end);
         fixed = end != s && !*end && pct >= 25 && pct <= 200;
