@@ -1028,7 +1028,7 @@ static void c0_table(uint8_t *at, const p_bind_buf b[16]) {
 // see: it tests the addresses listed in c0 + 0x900, 16 bytes each (address, size). Collected per dispatch from the bound
 // uniform and storage buffers, following stored pointers two levels down. ponytail: only stored pointers near the start of
 // a buffer are followed and each binding stops at 32 MiB; a real fix would give shaders the guest address space.
-#define DYN_C0 0x900
+#define DYN_C0 NVN2_C0_LIST
 #define DYN_N 32
 _Static_assert(0x770 + 16 * 16 <= DYN_C0, "native mesh table overlaps candidates");
 _Static_assert(DYN_C0 + DYN_N * 16 <= VK_C0_BYTES, "candidate list exceeds bank");
