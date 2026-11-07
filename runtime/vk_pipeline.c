@@ -151,20 +151,78 @@ static uint64_t key_hash(const void *k, size_t n) { return nvn_hm_hash(k, (uint3
 // The cache file lives next to totk.exe, so every build dir (the main build and each private fork) has its own:
 // forks that shared build\v121's cache broke each other's runs (2026-10-22).
 static PlatMutex cache_access = PLAT_MUTEX_INIT;
+// When both locks are needed, take cache_access before deferred_access.
+static PlatMutex deferred_access = PLAT_MUTEX_INIT;
+static VkPipelineCache deferred_cache;
+static uint32_t deferred_count;
+static uint64_t cache_updates;   // private cache results can arrive after the pipeline was counted
 
-static void cache_merge(VkPipelineCache source) {
+static VkPipelineCache cache_private(void) {
+    VkPipelineCache own = VK_NULL_HANDLE;
+    if (!P.cache) return own;
+    VkPipelineCacheCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    if (vkCreatePipelineCache(P.device, &ci, NULL, &own) != VK_SUCCESS) return VK_NULL_HANDLE;
+    // Seed the private build from the cache loaded at startup, including
+    // compute pipelines saved by a previous process.
+    plat_mutex_lock_shared(&cache_access);
+    if (P.cache) vkMergePipelineCaches(P.device, own, 1, &P.cache);
+    plat_mutex_unlock_shared(&cache_access);
+    return own;
+}
+
+static void cache_retry_deferred(void) {
+    if (!plat_mutex_trylock(&cache_access)) return;
+    if (!plat_mutex_trylock(&deferred_access)) {
+        plat_mutex_unlock(&cache_access);
+        return;
+    }
+    if (deferred_cache && P.cache && vkMergePipelineCaches(P.device, P.cache, 1, &deferred_cache) == VK_SUCCESS) {
+        vkDestroyPipelineCache(P.device, deferred_cache, NULL);
+        deferred_cache = VK_NULL_HANDLE;
+        rt_log("vk_pipeline: merged %u deferred pipeline caches", deferred_count);
+        deferred_count = 0;
+        __atomic_add_fetch(&cache_updates, 1, __ATOMIC_RELAXED);
+    }
+    plat_mutex_unlock(&deferred_access);
+    plat_mutex_unlock(&cache_access);
+}
+
+// Takes ownership of a private cache once its pipeline has finished building.
+static void cache_publish(VkPipelineCache source) {
     // A queued writer can block replay behind a slow driver compile. Keep the
     // compiled pipeline even if the cache stays busy (VUID 10202).
     const uint64_t deadline = plat_now_ns() + 50000000;
-    while (!plat_mutex_trylock(&cache_access)) {
-        if (plat_now_ns() >= deadline) {
-            rt_log("vk_pipeline: cache merge skipped after waiting 50 ms for the shared cache");
-            return;
+    do {
+        if (plat_mutex_trylock(&cache_access)) {
+            VkResult r = P.cache ? vkMergePipelineCaches(P.device, P.cache, 1, &source) : VK_ERROR_INITIALIZATION_FAILED;
+            plat_mutex_unlock(&cache_access);
+            if (r == VK_SUCCESS) {
+                vkDestroyPipelineCache(P.device, source, NULL);
+                __atomic_add_fetch(&cache_updates, 1, __ATOMIC_RELAXED);
+                return;
+            }
+            rt_log("vk_pipeline: shared cache merge failed (%d), retaining private cache", (int)r);
+            break;
         }
         plat_sleep_ms(5);
+    } while (plat_now_ns() < deadline);
+
+    plat_mutex_lock(&deferred_access);
+    // Aggregate delayed results in one cache instead of retaining a seeded
+    // copy of the shared cache for every pipeline that finishes.
+    if (!deferred_cache) {
+        deferred_cache = source;
+        source = VK_NULL_HANDLE;
+    } else if (vkMergePipelineCaches(P.device, deferred_cache, 1, &source) != VK_SUCCESS) {
+        rt_log("vk_pipeline: could not retain a private pipeline cache");
+        vkDestroyPipelineCache(P.device, source, NULL);
+        plat_mutex_unlock(&deferred_access);
+        return;
     }
-    if (P.cache) vkMergePipelineCaches(P.device, P.cache, 1, &source);
-    plat_mutex_unlock(&cache_access);
+    rt_log("vk_pipeline: private cache merge deferred (%u pending)", ++deferred_count);
+    __atomic_add_fetch(&cache_updates, 1, __ATOMIC_RELAXED);
+    plat_mutex_unlock(&deferred_access);
+    if (source) vkDestroyPipelineCache(P.device, source, NULL);
 }
 
 static void cache_path_init(void) {
@@ -2887,19 +2945,11 @@ static void pipe_worker(void *arg) {
         plat_mutex_unlock(&P.lock);
         // As with the big compute worker, do not hold the shared driver
         // cache during a large compilation.
-        VkPipelineCache own = VK_NULL_HANDLE;
-        if (j->large && P.cache) {
-            VkPipelineCacheCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
-            if (vkCreatePipelineCache(P.device, &ci, NULL, &own) == VK_SUCCESS) {
-                plat_mutex_lock_shared(&cache_access);
-                vkMergePipelineCaches(P.device, own, 1, &P.cache);
-                plat_mutex_unlock_shared(&cache_access);
-            }
-        }
+        VkPipelineCache own = j->large ? cache_private() : VK_NULL_HANDLE;
         VkPipeline pipe = create_graphics(&j->s, &j->k, j->l, j->fs_off, own ? own : P.cache);
         if (own) {
-            if (pipe) cache_merge(own);
-            vkDestroyPipelineCache(P.device, own, NULL);
+            if (pipe) cache_publish(own);
+            else vkDestroyPipelineCache(P.device, own, NULL);
         }
         plat_mutex_lock(&P.lock);
         if (pipe || !j->p->fast) j->p->info.pipeline = pipe;   // a failed optimised build keeps the fast-linked one
@@ -3487,7 +3537,7 @@ static struct {
 
 // LOCAL TEST (Ocarina): compute shaders with guarded candidates reach 17-30 MB of SPIR-V; the driver takes a minute or more and over 30 GB
 // for one, and it ran on the replay thread under P.lock: the game froze at the first broken pot. A big shader is built here first, one at a
-// time, so memory stays bounded, and its dispatches are skipped until then; vk_pipeline_compute then finds it in the driver's pipeline cache.
+// time, so memory stays bounded, and its dispatches are skipped until the pipeline is in the live table.
 // ponytail: a linear table of 1024 shaders and a polling worker; a dispatch skipped this way loses its effect for those frames.
 enum { BIG_CS_N = 1024 };
 static struct { const GfxShader *cs; volatile int done; } big_cs[BIG_CS_N];
@@ -3509,10 +3559,8 @@ static void big_cs_worker(void *arg) {
         plat_mutex_unlock(&P.lock);
         uint64_t t0 = plat_now_ns();
         // A cache of its own: a compile of minutes inside the shared cache held every other pipeline on the replay thread
-        // behind it, and the game froze for over a minute. The result is merged into the shared one when it is done.
-        VkPipelineCacheCreateInfo cci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
-        VkPipelineCache own = VK_NULL_HANDLE;
-        if (P.cache) vkCreatePipelineCache(P.device, &cci, NULL, &own);
+        // behind it, and the game froze for over a minute.
+        VkPipelineCache own = cache_private();
         cs_build_cache = own;
         VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
         cs_build_cache = VK_NULL_HANDLE;
@@ -3534,8 +3582,8 @@ static void big_cs_worker(void *arg) {
         rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, built ? "" : " (failed)");
         __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         if (own) {
-            if (built) cache_merge(own);
-            vkDestroyPipelineCache(P.device, own, NULL);
+            if (built) cache_publish(own);
+            else vkDestroyPipelineCache(P.device, own, NULL);
         }
         next++;
     }
@@ -4048,9 +4096,19 @@ void vk_pipeline_save(void) {
     }
     size_t size = 0;
     void *data = NULL;
+    cache_retry_deferred();
     plat_mutex_lock_shared(&cache_access);
-    int got = vkGetPipelineCacheData(P.device, P.cache, &size, NULL) == VK_SUCCESS && size && (data = malloc(size)) &&
-              vkGetPipelineCacheData(P.device, P.cache, &size, data) == VK_SUCCESS;
+    plat_mutex_lock(&deferred_access);
+    VkPipelineCache snapshot = P.cache;
+    // A driver compile may still be using the shared cache. Persist the
+    // union via the deferred cache without waiting for an exclusive lock.
+    if (deferred_cache) {
+        if (vkMergePipelineCaches(P.device, deferred_cache, 1, &P.cache) == VK_SUCCESS) snapshot = deferred_cache;
+        else rt_log("vk_pipeline: could not include deferred pipelines in cache save");
+    }
+    int got = vkGetPipelineCacheData(P.device, snapshot, &size, NULL) == VK_SUCCESS && size && (data = malloc(size)) &&
+              vkGetPipelineCacheData(P.device, snapshot, &size, data) == VK_SUCCESS;
+    plat_mutex_unlock(&deferred_access);
     plat_mutex_unlock_shared(&cache_access);
     if (got) {
         if (!plat_file_write_atomic(P.cache_path, data, size)) rt_log("vk_pipeline: cannot write %s", P.cache_path);
@@ -4062,16 +4120,19 @@ void vk_pipeline_save(void) {
 // The game never shuts the device down (boot.c and the window end the process), so the cache is saved while it
 // runs: at most every 20 s, and only after new pipelines were built. New pipeline keys are appended every 2 s.
 static void autosave_once(void) {
-    static uint64_t last_n, last_ms, last_keys;
+    static uint64_t last_n, last_updates, last_ms, last_keys;
     if (!P.ready) return;
+    cache_retry_deferred();
     uint64_t now = plat_now_ms();
     if (*(volatile uint32_t *)&K.pend_n && now - last_keys >= 2000) last_keys = now, keys_flush();
     gfx_shader_record_flush(0);
     if (now - last_ms < 20000) return;
     VkPipeStats s;
     vk_pipeline_stats(&s);
-    if (s.graphics + s.compute == last_n) return;
+    uint64_t updates = __atomic_load_n(&cache_updates, __ATOMIC_RELAXED);
+    if (s.graphics + s.compute == last_n && updates == last_updates) return;
     last_n = s.graphics + s.compute, last_ms = now;
+    last_updates = updates;
     vk_pipeline_save();
 }
 
@@ -4126,6 +4187,11 @@ void vk_pipeline_shutdown(void) {
     }
     plat_mutex_lock(&save_lock);   // not while the autosave thread copies it
     plat_mutex_lock(&cache_access);
+    plat_mutex_lock(&deferred_access);
+    if (deferred_cache) vkDestroyPipelineCache(P.device, deferred_cache, NULL);
+    deferred_cache = VK_NULL_HANDLE;
+    deferred_count = 0;
+    plat_mutex_unlock(&deferred_access);
     if (P.cache) vkDestroyPipelineCache(P.device, P.cache, NULL);
     P.cache = VK_NULL_HANDLE;
     plat_mutex_unlock(&cache_access);
