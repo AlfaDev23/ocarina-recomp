@@ -11,8 +11,15 @@ $GB_NECESSARIOS = 40
 $LOG = Join-Path $env:TEMP 'ocarina-instalador.log'
 $TIGELA = [char]::ConvertFromUtf32(0x1F35C)
 
-$PT = (Get-UICulture).TwoLetterISOLanguageName -eq 'pt'
-function L($pt, $en) { if ($PT) { return $pt } return $en }
+$script:emPT = (Get-UICulture).TwoLetterISOLanguageName -eq 'pt'   # not $PT: names are case-insensitive, so it would be the $pt parameter of L
+# while the window is built, L keeps both texts joined by a control character and Idioma picks one
+$SEP = [char]1
+$script:marcar = $true
+function L($pt, $en) {
+    if ($script:marcar) { return "$pt$SEP$en" }
+    if ($script:emPT) { return $pt } return $en
+}
+function Pick([string]$m) { $p = $m.Split($SEP); if ($script:emPT) { return $p[0] } return $p[1] }
 
 $script:cancelar = $false
 $script:rodando = $false
@@ -22,7 +29,7 @@ $script:feito = 0.0
 $script:pesoAtual = 1.0
 $script:proc = $null
 
-$DICAS = @(
+function Dicas() { return @(
     (L 'Um miojo fica pronto em 3 minutos. Isto aqui leva um pouco mais.' 'Instant noodles take 3 minutes. This takes a little longer.'),
     (L 'A barra quase parada não é travamento: enquanto o relógio acima andar, está tudo funcionando.' 'A nearly still bar is not a freeze: while the clock above moves, everything is working.'),
     (L 'Pode usar o PC enquanto instala, só vai ficar um pouco mais lento.' 'You can use your PC during the install, it will just be a little slower.'),
@@ -31,7 +38,7 @@ $DICAS = @(
     (L 'O jogo não vem daqui: ele é montado no seu PC, a partir do seu próprio arquivo.' 'The game does not come from here: it is built on your PC from your own copy.'),
     (L 'Dá tempo de fazer uns vinte miojos. Com tempero, por favor.' 'There is time to cook about twenty bowls of noodles. Seasoning included, please.'),
     (L 'Na primeira vez jogando, áreas novas podem dar umas travadinhas. Depois melhora.' 'The first time you play, new areas may stutter a little. It gets better after that.')
-)
+) }
 
 # ---- a janela
 function Rotulo($texto, $x, $y, $l, $a, $tam = 10, $negrito = $false) {
@@ -54,18 +61,20 @@ $form.ClientSize = New-Object Drawing.Size(640, 560)
 $form.FormBorderStyle = 'FixedSingle'; $form.MaximizeBox = $false; $form.StartPosition = 'CenterScreen'
 $form.KeyPreview = $true
 
-$titulo = Rotulo 'Ocarina Recomp' 24 16 590 40 20 $true
+$titulo = Rotulo 'Ocarina Recomp' 24 16 480 40 20 $true
 $sub = Rotulo (L 'Ocarina of Time nativo no Windows, sem emulador. Experimental.' 'Ocarina of Time running natively on Windows, no emulator. Experimental.') 26 56 590 24
-$form.Controls.AddRange(@($titulo, $sub))
+$btIdioma = Botao '' 516 18 100 30
+$btIdioma.Font = New-Object Drawing.Font('Segoe UI', 9)
+$form.Controls.AddRange(@($titulo, $sub, $btIdioma))
 
 # Tela 1: escolher o jogo
 $tela1 = New-Object Windows.Forms.Panel
 $tela1.SetBounds(0, 86, 640, 430)
-$t1a = Rotulo (L "O que este instalador faz:`n`n  1. Copia as ferramentas que vêm no ZIP para a pasta de instalação. Não instala nada no Windows.`n  2. Monta o jogo no seu PC a partir do SEU arquivo do jogo.`n  3. Cria um atalho na Área de Trabalho.`n`nLeva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para desinstalar, apague a pasta." "What this installer does:`n`n  1. Copies the tools from the ZIP to the install folder. It installs nothing in Windows.`n  2. Builds the game on your PC from YOUR copy of the game.`n  3. Creates a shortcut on your desktop.`n`nIt takes 30 minutes to 2 hours, and you can use your PC in the meantime. To uninstall, delete the folder.") 26 0 590 130
+$t1a = Rotulo (L "O que este instalador faz:`n  1. Copia as ferramentas que vêm no ZIP para a pasta de instalação. Não instala nada no Windows.`n  2. Monta o jogo no seu PC a partir do SEU arquivo do jogo.`n  3. Cria um atalho na Área de Trabalho.`n`nLeva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para desinstalar, apague a pasta." "What this installer does:`n  1. Copies the tools from the ZIP to the install folder. It installs nothing in Windows.`n  2. Builds the game on your PC from YOUR copy of the game.`n  3. Creates a shortcut on your desktop.`n`nIt takes 30 minutes to 2 hours, and you can use your PC in the meantime. To uninstall, delete the folder.") 26 0 590 130
 $t1b = Rotulo (L 'Passo 1: mostre onde está o seu jogo (versão 1.1.1)' 'Step 1: show where your game is (version 1.1.1)') 26 136 590 24 11 $true
 $btArq = Botao (L 'Escolher arquivo .nup' 'Choose .nup file') 26 164 280
 $btPasta = Botao (L 'Escolher pasta com exefs e romfs' 'Choose folder with exefs and romfs') 322 164 292
-$lbJogo = Rotulo (L 'Nada escolhido ainda.' 'Nothing chosen yet.') 26 206 590 42
+$lbJogo = Rotulo '' 26 206 590 42
 $t1c = Rotulo (L 'Passo 2: confira onde instalar' 'Step 2: check where to install') 26 252 590 24 11 $true
 $lbPasta = Rotulo '' 26 280 440 24
 $btTrocar = Botao (L 'Trocar pasta' 'Change folder') 482 274 132 32
@@ -90,7 +99,7 @@ $barra.Maximum = 1000
 $lbPct = Rotulo '' 26 250 588 22 10 $true
 $lbLinha = Rotulo '' 26 274 588 40 8
 $lbLinha.ForeColor = [Drawing.Color]::Gray
-$lbDica = Rotulo $DICAS[0] 26 318 588 44 10
+$lbDica = Rotulo '' 26 318 588 44 10
 $btJogar = Botao (L 'Jogar' 'Play') 26 370 180 44
 $btJogar.Font = New-Object Drawing.Font('Segoe UI', 12, [Drawing.FontStyle]::Bold)
 $btJogar.Visible = $false
@@ -109,12 +118,56 @@ $btLog.Text = (L 'Ver registro da instalação' 'View install log'); $btLog.SetB
 $form.Controls.AddRange(@($rodape, $btLog))
 $btLog.add_LinkClicked({ if (Test-Path $LOG) { Start-Process notepad.exe $LOG } })
 
+# ---- o idioma: o botao do canto troca entre portugues e ingles, os dois textos ficam no Tag
+function Idioma([Windows.Forms.Control]$c) {
+    if ($c.Text.Contains($SEP)) { $c.Tag = $c.Text }
+    if ($c.Tag -is [string] -and $c.Tag.Contains($SEP)) { $c.Text = Pick $c.Tag }
+    foreach ($f in $c.Controls) { Idioma $f }
+}
+# texts that change while running are redone from these states
+$script:jogoEstado = 'nada'; $script:segredo = $false; $script:fim = $null; $script:passoAtual = 0
+function TextoJogo() {
+    switch ($script:jogoEstado) {
+        'nada' { $lbJogo.Text = (L 'Nada escolhido ainda.' 'Nothing chosen yet.'); $lbJogo.ForeColor = [Drawing.Color]::Empty }
+        'pronta' { $lbJogo.Text = (L 'Esta pasta já tem os arquivos do jogo convertidos: não precisa escolher o jogo de novo.' 'This folder already has the converted game files: no need to choose the game again.'); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen }
+        'jogo' { $lbJogo.Text = (L "Jogo: $($script:jogo)" "Game: $($script:jogo)"); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen }
+        'invalido' { $lbJogo.Text = (L 'Essa pasta não tem as subpastas exefs e romfs do jogo. Escolha a pasta certa.' 'This folder does not have the game''s exefs and romfs subfolders. Choose the right folder.'); $lbJogo.ForeColor = [Drawing.Color]::Firebrick }
+    }
+}
+function TextoSegredo() {
+    $titulo.Text = "Ocarina Recomp $TIGELA"
+    $sub.Text = (L 'Edição especial do Miojo: 3 minutos de fogo e várias horas de recompilação.' 'Miojo special edition: 3 minutes on the stove and many hours of recompiling.')
+}
+function TextoFim() {
+    if ($script:fim -eq 'ok') {
+        $lbPct.Text = (L 'Pronto! 100%' 'Done! 100%')
+        $lbDica.Text = (L "Conecte um controle e bom jogo!`nNa primeira vez, a vegetação pode levar alguns minutos para aparecer e áreas novas podem travar um pouco: é normal. Não compartilhe o jogo montado, os saves nem o cache: eles saem do seu jogo." "Plug in a controller and have fun!`nThe first time, plants can take a few minutes to appear and new areas may stutter a little: that is normal. Do not share the built game, the saves or the cache: they come from your game.")
+    } elseif ($script:fim -eq 'erro') {
+        $lbPct.Text = (L 'A instalação parou.' 'The installation stopped.')
+    }
+}
+function RefrescarLista() {
+    $p = Passos
+    for ($i = 0; $i -lt $p.Count -and $i -lt $lista.Items.Count; $i++) {
+        $lista.Items[$i] = if ($i -lt $script:passoAtual) { " OK  $($p[$i][0])" } elseif ($i -eq $script:passoAtual) { " >  $($p[$i][0])..." } else { "      $($p[$i][0])" }
+    }
+}
+function AplicarIdioma() {
+    Idioma $form
+    $btIdioma.Text = if ($script:emPT) { 'English' } else { 'Português' }
+    if ($script:segredo) { TextoSegredo }
+    Validar
+    if ($lista.Items.Count) { RefrescarLista }
+    if ($script:fim) { TextoFim }
+    if ($script:fim -ne 'ok' -and -not $script:rodando) { $lbDica.Text = (Dicas)[0] }
+}
+$btIdioma.add_Click({ $script:emPT = -not $script:emPT; AplicarIdioma })
+
 # ---- o segredo do Miojo: digitar "miojo" na janela, ou clicar 5 vezes na assinatura
 $script:digitado = ''
 $script:cliques = 0
 function Segredo() {
-    $titulo.Text = "Ocarina Recomp $TIGELA"
-    $sub.Text = (L 'Edição especial do Miojo: 3 minutos de fogo e várias horas de recompilação.' 'Miojo special edition: 3 minutes on the stove and many hours of recompiling.')
+    $script:segredo = $true; TextoSegredo
     [Windows.Forms.MessageBox]::Show((L "Você achou o miojo escondido!`n`nMiojo manda um salve para quem lê até o rodapé.`nTem outro escondido dentro do jogo: tente digitar o mesmo nome lá." "You found the hidden noodles!`n`nMiojo says hi to everyone who reads the footer.`nThere is another one inside the game: try typing the same name there."), (L "$TIGELA Segredo do Miojo" "$TIGELA Miojo's secret")) | Out-Null
 }
 $form.add_KeyPress({
@@ -163,8 +216,8 @@ function Atualizar() {
     $minutos = [int][Math]::Floor(([DateTime]::Now - $script:passoIni).TotalMinutes)
     $segundos = ([DateTime]::Now - $script:passoIni).Seconds
     $lbPct.Text = (L '{0:0}% concluído. Nesta etapa há {1} min {2:00} s.' '{0:0}% done. On this step for {1} min {2:00} s.') -f (100 * $total), $minutos, $segundos
-    $dica = [int]([long]([DateTime]::Now.Ticks / 250000000) % $DICAS.Count)
-    $lbDica.Text = $DICAS[$dica]
+    $dica = [int]([long]([DateTime]::Now.Ticks / 250000000) % (Dicas).Count)
+    $lbDica.Text = (Dicas)[$dica]
     [Windows.Forms.Application]::DoEvents()
 }
 
@@ -283,14 +336,14 @@ function P-Finalizar() {
     $atalho.Save()
 }
 
-$PASSOS = @(
+function Passos() { return @(
     @((L 'Copiar as ferramentas' 'Copy the tools'), 3, 'P-Copiar'),
     @((L 'Conferir o seu jogo' 'Check your game'), 2, 'P-Exefs'),
     @((L 'Converter o código do jogo' 'Convert the game code'), 2, 'P-Gerar'),
     @((L 'Preparar os arquivos do jogo (pode levar mais de 1 hora em HD)' 'Prepare the game files (can take over 1 hour on a hard drive)'), 25, 'P-Romfs'),
     @((L 'Compilar o jogo (a parte mais demorada)' 'Build the game (the longest part)'), 35, 'P-Exe'),
     @((L 'Criar o atalho' 'Create the shortcut'), 1, 'P-Finalizar')
-)
+) }
 
 function Explicar($erro) {
     $trecho = ''
@@ -311,25 +364,27 @@ function FimDoRegistro() {
 function Instalar() {
     $tela1.Visible = $false; $tela2.Visible = $true
     $script:rodando = $true
+    $PASSOS = Passos
     $total = ($PASSOS | ForEach-Object { $_[1] } | Measure-Object -Sum).Sum
-    foreach ($p in $PASSOS) { [void]$lista.Items.Add("      $($p[0])") }
+    foreach ($p in $PASSOS) { [void]$lista.Items.Add('') }
+    $script:passoAtual = 0; $script:fim = $null; RefrescarLista
     Set-Content -Path $LOG -Value "Ocarina Recomp, instalador, $(Get-Date)" -Encoding UTF8
     try {
         for ($i = 0; $i -lt $PASSOS.Count; $i++) {
             $p = $PASSOS[$i]
-            $lista.Items[$i] = " >  $($p[0])..."
+            $script:passoAtual = $i; RefrescarLista
             $script:passoIni = [DateTime]::Now; $script:estimativa = $p[1]; $script:pesoAtual = $p[1] / $total
             Registrar "=== $($p[0])"
             $script:passoNome = $p[0]
             if ($i -ge 3 -or (Test-Path $script:pasta)) { if (Test-Path $script:pasta) { Set-Location $script:pasta } }
             & $p[2]
             $script:feito += $script:pesoAtual
-            $lista.Items[$i] = " OK  $($p[0])"
+            $script:passoAtual = $i + 1; RefrescarLista
         }
         $barra.Value = 1000
-        $lbPct.Text = (L 'Pronto! 100%' 'Done! 100%')
+        $script:fim = 'ok'
         $lbLinha.Text = ''
-        $lbDica.Text = (L "Conecte um controle e bom jogo!`nNa primeira vez, a vegetação pode levar alguns minutos para aparecer e áreas novas podem travar um pouco: é normal. Não compartilhe o jogo montado, os saves nem o cache: eles saem do seu jogo." "Plug in a controller and have fun!`nThe first time, plants can take a few minutes to appear and new areas may stutter a little: that is normal. Do not share the built game, the saves or the cache: they come from your game.")
+        TextoFim
         $btJogar.Visible = $true; $btImportar.Visible = $true; $btFechar.Visible = $true
         $script:rodando = $false
         if ($env:OCARINA_AUTO) { Registrar 'INSTALACAO CONCLUIDA'; $form.Close() }
@@ -338,7 +393,7 @@ function Instalar() {
         $msg = "$($_.Exception.Message)"
         Registrar "ERRO: $msg"
         if ($msg -eq 'CANCELADO') { $form.Close(); return }
-        $lbPct.Text = (L 'A instalação parou.' 'The installation stopped.')
+        $script:fim = 'erro'; TextoFim
         $btFechar.Visible = $true
         if ($env:OCARINA_AUTO) { $form.Close(); return }
         $r = [Windows.Forms.MessageBox]::Show((L "Etapa: $($script:passoNome)" "Step: $($script:passoNome)") + "`n`n" + (Explicar $msg) + (FimDoRegistro) + (L "`n`nQuer ver o registro da instalação?" "`n`nDo you want to see the install log?"), 'Ocarina Recomp', 'YesNo', 'Warning')
@@ -363,25 +418,23 @@ function Validar() {
     if ($script:pasta -match '[^\x21-\x7E]|[\[\]%&]') { $problema += (L 'A pasta de instalação não pode ter espaços nem acentos.' 'The install folder cannot have spaces or accents.') }
     elseif (-not $parcial -and $livre -lt $GB_NECESSARIOS) { $problema += (L "Faltam $($GB_NECESSARIOS - $livre) GB livres em ${unid}: (precisa de $GB_NECESSARIOS GB)." "You need $($GB_NECESSARIOS - $livre) GB more free on ${unid}: ($GB_NECESSARIOS GB required).") }
     $lbPasta.Text = (L "$($script:pasta)   ($livre GB livres)" "$($script:pasta)   ($livre GB free)")
-    $lbAviso.Text = ($problema + $script:avisos) -join "`n"
+    $lbAviso.Text = ($problema + @($script:avisos | ForEach-Object { Pick $_ })) -join "`n"
     $pronta = JaInstalada $script:pasta
-    if ($pronta -and -not $script:jogo) { $lbJogo.Text = (L 'Esta pasta já tem os arquivos do jogo convertidos: não precisa escolher o jogo de novo.' 'This folder already has the converted game files: no need to choose the game again.'); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen }
+    if ($pronta -and -not $script:jogo) { $script:jogoEstado = 'pronta' }
+    TextoJogo
     $btInstalar.Enabled = ($problema.Count -eq 0) -and ([bool]$script:jogo -or $pronta) -and -not $script:bloqueio
 }
 function EscolherJogo([string]$c) {
     if ((Test-Path -LiteralPath $c -PathType Container) -and (JaInstalada $c)) { $script:pasta = $c; $script:jogo = $null; Validar; return }
     # -LiteralPath: game files are often named with [title id], and [ ] are wildcards to the plain -Path
     if ($c -match '\.nup$' -and (Test-Path -LiteralPath $c -PathType Leaf)) {
-        $script:jogo = $c; $script:jogoNup = $true
-        $lbJogo.Text = (L "Jogo: $c" "Game: $c"); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen
+        $script:jogo = $c; $script:jogoNup = $true; $script:jogoEstado = 'jogo'
     } else {
         $b = if (Test-Path -LiteralPath (Join-Path $c 'base\exefs\main')) { Join-Path $c 'base' } else { $c }
         if ((Test-Path -LiteralPath (Join-Path $b 'exefs\main')) -and (Test-Path -LiteralPath (Join-Path $b 'romfs'))) {
-            $script:jogo = $b; $script:jogoNup = $false
-            $lbJogo.Text = (L "Jogo: $b" "Game: $b"); $lbJogo.ForeColor = [Drawing.Color]::DarkGreen
+            $script:jogo = $b; $script:jogoNup = $false; $script:jogoEstado = 'jogo'
         } else {
-            $script:jogo = $null
-            $lbJogo.Text = (L 'Essa pasta não tem as subpastas exefs e romfs do jogo. Escolha a pasta certa.' 'This folder does not have the game''s exefs and romfs subfolders. Choose the right folder.'); $lbJogo.ForeColor = [Drawing.Color]::Firebrick
+            $script:jogo = $null; $script:jogoEstado = 'invalido'
         }
     }
     Validar
@@ -436,7 +489,8 @@ if (-not $SETUP -or -not (Test-Path -LiteralPath (Join-Path $SETUP 'ferramentas\
     $script:avisos += (L 'Extraia o ZIP inteiro para uma pasta e abra o instalador de dentro dela.' 'Unpack the whole ZIP to a folder and open the installer from inside it.')
     $script:bloqueio = $true
 }
-Validar
+$script:marcar = $false
+AplicarIdioma
 if ($env:OCARINA_JOGO) { EscolherJogo $env:OCARINA_JOGO }
 if ($env:OCARINA_AUTO) { if (-not $script:jogo -and -not (JaInstalada $script:pasta)) { throw 'OCARINA_JOGO: jogo nao encontrado' }; $form.add_Shown({ Instalar }) }
 
