@@ -2331,6 +2331,13 @@ static VkPipeline create_graphics(const VkPipeState *s, const GKey *k, const Lay
     int shared = cache && cache == P.cache;
     if (shared) plat_mutex_lock_shared(&cache_access);
     VkResult r = vkCreateGraphicsPipelines(P.device, cache, 1, &pi, NULL, &pipe);
+    // AMD's compiler gives up on large programs (-1, out of host memory, on an RX 6750 XT: the scene stayed black at
+    // 1 fps). Built again without optimization, as NotRexed/Hookshot's RX_VK_NOOPT does; NVIDIA never gets here.
+    if (r != VK_SUCCESS && vk_caps.amd && !(pi.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) {
+        pi.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+        r = vkCreateGraphicsPipelines(P.device, cache, 1, &pi, NULL, &pipe);
+        rt_log("vk_pipeline: graphics pipeline built again without optimization: %s", r == VK_SUCCESS ? "ok" : "failed too");
+    }
     if (shared) plat_mutex_unlock_shared(&cache_access);
     plat_crash_note(NULL);
     perf_end(PERF_PIPE, p0);   // counts on the render thread only, so background builds stay out of it
@@ -3493,6 +3500,11 @@ static VkPipeline compute_create(const GfxShader *cs, const Layout *l) {
     VkPipeline pipe = VK_NULL_HANDLE;
     if (!cs_build_cache) plat_mutex_lock_shared(&cache_access);
     if (vkCreateComputePipelines(P.device, cs_build_cache ? cs_build_cache : P.cache, 1, &ci, NULL, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+    if (!pipe && vk_caps.amd && !(ci.flags & VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT)) {   // as for graphics, above
+        ci.flags |= VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+        if (vkCreateComputePipelines(P.device, cs_build_cache ? cs_build_cache : P.cache, 1, &ci, NULL, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+        rt_log("vk_pipeline: compute pipeline built again without optimization: %s", pipe ? "ok" : "failed too");
+    }
     if (!cs_build_cache) plat_mutex_unlock_shared(&cache_access);
     vkDestroyShaderModule(P.device, m, NULL);
     return pipe;
