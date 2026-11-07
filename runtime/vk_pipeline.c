@@ -3320,6 +3320,7 @@ static uint64_t big_cs_words(void) {
     return w;
 }
 
+static _Thread_local VkPipelineCache cs_build_cache;   // the big compute worker's own cache, see big_cs_worker
 static VkPipeline compute_create(const GfxShader *cs, const Layout *l) {
     uint64_t words;
     const uint32_t *code = gfx_shader_spirv(cs, &words);
@@ -3344,7 +3345,7 @@ static VkPipeline compute_create(const GfxShader *cs, const Layout *l) {
         if (ci.stage.pNext && ls[0] && ls[0] % vk_caps.sg_size == 0) ci.stage.flags |= VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
     }
     VkPipeline pipe = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(P.device, P.cache, 1, &ci, NULL, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(P.device, cs_build_cache ? cs_build_cache : P.cache, 1, &ci, NULL, &pipe) != VK_SUCCESS) pipe = VK_NULL_HANDLE;
     vkDestroyShaderModule(P.device, m, NULL);
     return pipe;
 }
@@ -3421,8 +3422,19 @@ static void big_cs_worker(void *arg) {
         Layout *l = compute_layout(cs, &B, &why);
         plat_mutex_unlock(&P.lock);
         uint64_t t0 = plat_now_ns();
+        // A cache of its own: a compile of minutes inside the shared cache held every other pipeline on the replay thread
+        // behind it, and the game froze for over a minute. The result is merged into the shared one when it is done.
+        VkPipelineCacheCreateInfo cci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+        VkPipelineCache own = VK_NULL_HANDLE;
+        if (P.cache) vkCreatePipelineCache(P.device, &cci, NULL, &own);
+        cs_build_cache = own;
         VkPipeline pipe = why ? VK_NULL_HANDLE : compute_create(cs, l);
+        cs_build_cache = VK_NULL_HANDLE;
         if (pipe) vkDestroyPipeline(P.device, pipe, NULL);
+        if (own) {
+            vkMergePipelineCaches(P.device, P.cache, 1, &own);
+            vkDestroyPipelineCache(P.device, own, NULL);
+        }
         rt_log("vk_pipeline: big compute shader %d built in %.1f s%s", next, (double)(plat_now_ns() - t0) / 1e9, pipe ? "" : " (failed)");
         __atomic_store_n(&big_cs[next].done, 1, __ATOMIC_RELEASE);
         next++;
