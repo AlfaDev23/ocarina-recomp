@@ -116,7 +116,9 @@ $rodape.Cursor = [Windows.Forms.Cursors]::Hand
 $btLog = New-Object Windows.Forms.LinkLabel
 $btLog.Text = (L 'Ver registro da instalação' 'View install log'); $btLog.SetBounds(446, 528, 180, 22); $btLog.TextAlign = 'MiddleRight'
 $form.Controls.AddRange(@($rodape, $btLog))
-$btLog.add_LinkClicked({ if (Test-Path $LOG) { Start-Process notepad.exe $LOG } })
+# Notepad can be missing from Windows: show the file in Explorer then. An error here would take down the window.
+function AbrirRegistro() { try { Start-Process notepad.exe $LOG } catch { Start-Process "$env:windir\explorer.exe" "/select,`"$LOG`"" } }
+$btLog.add_LinkClicked({ if (Test-Path $LOG) { AbrirRegistro } })
 
 # ---- o idioma: o botao do canto troca entre portugues e ingles, os dois textos ficam no Tag
 function Idioma([Windows.Forms.Control]$c) {
@@ -397,7 +399,7 @@ function Instalar() {
         $btFechar.Visible = $true
         if ($env:OCARINA_AUTO) { $form.Close(); return }
         $r = [Windows.Forms.MessageBox]::Show((L "Etapa: $($script:passoNome)" "Step: $($script:passoNome)") + "`n`n" + (Explicar $msg) + (FimDoRegistro) + (L "`n`nQuer ver o registro da instalação?" "`n`nDo you want to see the install log?"), 'Ocarina Recomp', 'YesNo', 'Warning')
-        if ($r -eq 'Yes') { Start-Process notepad.exe $LOG }
+        if ($r -eq 'Yes') { AbrirRegistro }
     }
 }
 
@@ -460,11 +462,11 @@ $btTrocar.add_Click({
 })
 $btInstalar.add_Click({ Instalar })
 $btJogar.add_Click({
-    Start-Process powershell.exe -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script:pasta\jogar\jogar-ocarina.ps1`""
+    Start-Process "$PSHOME\powershell.exe" -ArgumentList "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script:pasta\jogar\jogar-ocarina.ps1`""
     $form.Close()
 })
 $btFechar.add_Click({ $form.Close() })
-$btImportar.add_Click({ Start-Process powershell.exe -ArgumentList "-NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script:pasta\jogar\importar-save.ps1`"" })
+$btImportar.add_Click({ Start-Process "$PSHOME\powershell.exe" -ArgumentList "-NoProfile -Sta -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script:pasta\jogar\importar-save.ps1`"" })
 $form.add_FormClosing({
     param($s, $e)
     if (-not $script:rodando) { return }
