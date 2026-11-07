@@ -17,6 +17,13 @@ if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L 2>/dev/null | grep -q 
 fi
 export TOTK_PROFILE_DIR="$root/perfil"
 
+# A fullscreen window on a tiling Wayland compositor (niri, sway) takes the only output and the keyboard, and the
+# player cannot reach the chat or the terminal to send a command. Start windowed unless asked otherwise: F11 toggles
+# fullscreen, and TOTK_FULLSCREEN=1 ./jogar/jogar-ocarina.sh starts fullscreen. A Steam Deck keeps its profile.
+if [ -z "${TOTK_FULLSCREEN:-}" ] && [ -z "${SteamDeck:-}" ]; then
+    export TOTK_FULLSCREEN=0
+fi
+
 if [ ! -x "$root/build/oot111/ocarina" ]; then
     echo "build/oot111/ocarina not found: run ./compilar.sh --jogo <your game> first" >&2
     exit 1
