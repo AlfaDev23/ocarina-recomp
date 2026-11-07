@@ -4136,7 +4136,10 @@ void vk_pipeline_save(void) {
     size_t size = 0;
     void *data = NULL;
     cache_retry_deferred();
-    plat_mutex_lock_shared(&cache_access);
+    // Exclusive: Intel's driver (Arc 140V, 101.8991) reads a null pointer in vkGetPipelineCacheData (igvk64.dll+0x653291,
+    // the "pipe autosave" thread) while another thread builds a pipeline into the same cache. trylock, so a waiting
+    // save never holds back the replay's builds behind a compile of seconds.
+    while (!plat_mutex_trylock(&cache_access)) plat_sleep_ms(2);
     plat_mutex_lock(&deferred_access);
     VkPipelineCache snapshot = P.cache;
     // A driver compile may still be using the shared cache. Persist the
@@ -4148,7 +4151,7 @@ void vk_pipeline_save(void) {
     int got = vkGetPipelineCacheData(P.device, snapshot, &size, NULL) == VK_SUCCESS && size && (data = malloc(size)) &&
               vkGetPipelineCacheData(P.device, snapshot, &size, data) == VK_SUCCESS;
     plat_mutex_unlock(&deferred_access);
-    plat_mutex_unlock_shared(&cache_access);
+    plat_mutex_unlock(&cache_access);
     if (got) {
         if (!plat_file_write_atomic(P.cache_path, data, size)) rt_log("vk_pipeline: cannot write %s", P.cache_path);
     }
