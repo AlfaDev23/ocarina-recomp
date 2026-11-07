@@ -2594,6 +2594,14 @@ void gfx_shader_record_at(const char *keys_path) {
     plat_mutex_unlock(&RC.lock);
 }
 
+// One shader-programs.bin record: what play writes (ans_note) and what --lower-stages writes (gfx_shader_lower_stages).
+static void prg_put(Bytes *b, uint32_t st, const uint8_t *control, const uint8_t *code, const Req *r) {
+    uint32_t head[3] = {st, r->length, r->c1_len};
+    bytes_put(b, head, 12), bytes_put(b, r->code_hash, 32);
+    bytes_put(b, control, CONTROL_SIZE), bytes_put(b, code, r->length);
+    bytes_put(b, r->c1, r->c1_len);
+}
+
 // A get resolved (r, a) to s: queue the record when its input id is new, and its program when new. Cost: a set
 // lookup under a lock per call; gets happen per (program, answers) change in vk_exec_draw's shader table, not per draw.
 static void ans_note(const Req *r, int stage, const uint8_t *control, const uint8_t *code, const GfxShaderAnswers *a,
@@ -2606,16 +2614,62 @@ static void ans_note(const Req *r, int stage, const uint8_t *control, const uint
         uint8_t rec[ANS_REC] = {0};
         memcpy(rec, &st, 4), memcpy(rec + 4, r->code_hash, 32), memcpy(rec + 36, s->iid, 32);
         pack_geometry_answers(rec + 68, a);
-        if (set_add(&RC.progs, hash8(r->code_hash))) {
-            uint32_t head[3] = {st, r->length, r->c1_len};
-            bytes_put(&RC.prg, head, 12), bytes_put(&RC.prg, r->code_hash, 32);
-            bytes_put(&RC.prg, control, CONTROL_SIZE), bytes_put(&RC.prg, code, r->length);
-            bytes_put(&RC.prg, r->c1, r->c1_len);
-        }
+        if (set_add(&RC.progs, hash8(r->code_hash))) prg_put(&RC.prg, st, control, code, r);
         bytes_put(&RC.ans, rec, sizeof rec);
         RC.pairs_new++;
     }
     plat_mutex_unlock(&RC.lock);
+}
+
+// ocarina.exe --lower-stages <pack> <dir>: the raw NVN 2 stages tools/oot/shader_extract.py --pack takes from the
+// player's RomFS, lowered as nvnProgramSetShaders does (nvn_api_obj.c), into <dir>/seed-programs.bin, the program
+// records play would write for them, so --prepare-shaders needs no play to know the programs. Pack: "OOTSTGPK",
+// version 1, count; per stage control size, code size, control, code. Geometry stages are left out: their code hash
+// takes the input primitive from a draw's answers (build_code_hash), and their control the varyings of the program's
+// other stages (vk_exec_draw.c native_gs_control). Tessellation control stages are not translated (shader_for).
+int gfx_shader_lower_stages(const char *pack, const char *dir) {
+    double t0 = plat_now_ms();
+    uint64_t size = 0;
+    uint8_t *f = read_file(pack, &size);
+    uint32_t count = 0;
+    if (!f || size < 16 || memcmp(f, "OOTSTGPK\1\0\0\0", 12)) {
+        fprintf(stderr, "lower-stages: %s is not a stage pack (tools/oot/shader_extract.py --pack)\n", pack);
+        return free(f), 2;
+    }
+    memcpy(&count, f + 12, 4);
+    Bytes out = {0};
+    Set64 seen = {0};
+    RecHeader h = {{'T','O','T','K','S','P','R','G'}, PRG_VERSION, 0};
+    bytes_put(&out, &h, sizeof h);
+    uint32_t n = 0, failed = 0, skipped = 0, dup = 0;
+    for (uint64_t o = 16; n < count && size - o >= 8; n++) {
+        uint32_t csz, len;
+        memcpy(&csz, f + o, 4), memcpy(&len, f + o + 4, 4);
+        if (size - o - 8 < (uint64_t)csz + len) break;
+        const uint8_t *ctl = f + o + 8, *code = ctl + csz, *nctl, *ncode;
+        o += 8 + (uint64_t)csz + len;
+        if (!gfx_shader_is_nvn2(ctl) || !nvn2_lower(ctl, code, &nctl, &ncode)) { failed++; continue; }
+        uint32_t nst, c1_off;
+        memcpy(&nst, nctl + 0x714, 4), memcpy(&c1_off, nctl + 0x700, 4);
+        int st = nst == 0 || nst == 4 ? GFX_STAGE_VS : nst == 1 ? GFX_STAGE_FS : nst == 5 ? GFX_STAGE_CS : -1;
+        Req r = {.stage = st};
+        memcpy(&r.length, nctl + 0x704, 4);
+        r.c1_len = r.length - c1_off, r.c1 = ncode + c1_off;
+        if (st < 0 || c1_off > r.length ||
+            !build_code_hash(st, nctl, ncode, r.length, r.c1, r.c1_len, 0, r.code_hash)) { skipped++; continue; }
+        if (!set_add(&seen, hash8(r.code_hash))) { dup++; continue; }
+        prg_put(&out, (uint32_t)st, nctl, ncode, &r);
+    }
+    free(f), free(seen.v);
+    char path[PATH_CAP];
+    snprintf(path, sizeof path, "%s/seed-programs.bin", dir);
+    mkdir_p(dir);
+    int ok = n == count && plat_file_write_atomic(path, out.p, out.n);
+    printf("lower-stages: %u of %u stages read, %u programs (%zu MiB) to %s, %u did not lower, %u geometry or "
+           "tessellation control skipped, %u duplicates, in %.0f ms\n", n, count, seen.n, out.n >> 20, path, failed,
+           skipped, dup, plat_now_ms() - t0);
+    free(out.p);
+    return ok ? 0 : 1;
 }
 
 static int rec_append(const char *path, const char *magic, uint32_t version, uint32_t rec_size, const Bytes *b) {
