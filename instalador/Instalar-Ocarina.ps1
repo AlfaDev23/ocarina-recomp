@@ -325,6 +325,30 @@ function P-Exe() {
     $jobs = [Math]::Max(2, [Math]::Min([Environment]::ProcessorCount, [int]($ramGb / 3)))
     Exec $script:py @('tools\build_game.py', '--version', 'oot111', '--gen', 'generated\oot111', '--out', (Build 'oot111'), '--expected', 'tools\data\expected-oot111.json', '--exefs', (Build 'exefs'), '--romfs', (Build 'romfs'), '--jobs', "$jobs", '--toolchain', (Ferramenta 'llvm'), '--deps', (Ferramenta 'deps'), '--ninja', (Ferramenta 'bin\ninja.exe')) | Out-Null
 }
+# Shader preparation: the player's own shaders, extracted from the game files, lowered and translated for the variants
+# our seed lists (tools/data/oot-seed, answers and pipeline keys recorded in play), so a first start does not stop to
+# build them. Not needed to play: if it fails, the game still works and builds them as before.
+function P-Shaders() {
+    $seed = Join-Path $script:pasta 'tools\data\oot-seed'
+    $dir = Build 'oot111'
+    if (-not (Test-Path (Join-Path $seed 'seed-answers.bin'))) { Registrar 'shaders: sem semente, passo pulado'; return }
+    if (Test-Path (Join-Path $dir 'shader-prepared.bin')) { return }
+    $pack = Build 'shader-stages.pack'
+    $exe = Join-Path $dir 'ocarina.exe'
+    try {
+        Exec $script:py @('-I', 'tools\oot\shader_extract.py', '--romfs-image', (Build 'romfs\romfs.bin'), '--index', (Build 'romfs\index.json'), '--pack', $pack) | Out-Null
+        Exec $exe @('--lower-stages', $pack, $dir) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $seed 'seed-answers.bin') -Destination (Join-Path $dir 'seed-answers.bin') -Force
+        # the player's own keys, from earlier play, are kept
+        if (-not (Test-Path (Join-Path $dir 'pipeline-keys.bin'))) { Copy-Item -LiteralPath (Join-Path $seed 'pipeline-keys.bin') -Destination (Join-Path $dir 'pipeline-keys.bin') }
+        Exec $exe @('--prepare-shaders') | Out-Null
+    } catch {
+        if ("$($_.Exception.Message)" -eq 'CANCELADO') { throw }
+        Registrar "shaders: a preparação falhou, o jogo monta os shaders ao jogar: $($_.Exception.Message)"
+    } finally {
+        foreach ($f in $pack, (Join-Path $dir 'seed-programs.bin')) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force } }
+    }
+}
 function P-Finalizar() {
     $ini = Build 'oot111\totk.ini'
     if (-not (Test-Path $ini)) { Copy-Item (Join-Path $script:pasta 'jogar\totk.ini') $ini }
@@ -344,6 +368,7 @@ function Passos() { return @(
     @((L 'Converter o código do jogo' 'Convert the game code'), 2, 'P-Gerar'),
     @((L 'Preparar os arquivos do jogo (pode levar mais de 1 hora em HD)' 'Prepare the game files (can take over 1 hour on a hard drive)'), 25, 'P-Romfs'),
     @((L 'Compilar o jogo (a parte mais demorada)' 'Build the game (the longest part)'), 35, 'P-Exe'),
+    @((L 'Preparar os shaders (evita travadas na primeira vez)' 'Prepare the shaders (avoids stutter the first time)'), 3, 'P-Shaders'),
     @((L 'Criar o atalho' 'Create the shortcut'), 1, 'P-Finalizar')
 ) }
 

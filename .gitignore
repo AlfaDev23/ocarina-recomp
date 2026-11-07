@@ -77,3 +77,6 @@ desktop.ini
 /.worktrees/
 /logs/
 /ultima-partida*.log
+
+# the shader preparation seed: bundled into the setup ZIP by tools/oot/make_setup.py --seed, never committed
+tools/data/oot-seed/
