@@ -10,7 +10,7 @@ The folder holds, with nothing derived from the game (tools/check_content.py run
     Instalar-Ocarina.exe   instalador/launcher.c, which opens the script below
     instalador/            Instalar-Ocarina.ps1, the installer
     projeto/               this repository at HEAD (git archive), without the translator's sources and the tests
-    ferramentas/python/    python.org embeddable 3.14, numpy and lz4 (recomp/gen.py)
+    ferramentas/python/    python.org embeddable 3.14, numpy and lz4 (recomp/gen.py), zstandard (tools/oot/shader_extract.py)
     ferramentas/llvm/      llvm-mingw, x86_64 only: what clang and lld need to compile and link the game
     ferramentas/deps/      headers, libraries and DLLs of Vulkan, VMA, SDL3, Opus, libvpx, dav1d and zstd
     ferramentas/bin/       ninja.exe, unzbic.exe (kinnay/zbic, GPL-2.0), totk_xlate.exe and totk_xlate.id
@@ -128,7 +128,7 @@ def build_python(tools):
     # the embeddable Python ignores the script's folder once a ._pth exists: ferramentas\python, so the project is two levels up
     (py / 'python314._pth').write_text('python314.zip\n.\nLib/site-packages\n../../tools\n../../recomp\n', encoding='utf-8')
     run([sys.executable, '-m', 'pip', 'install', '-q', '--disable-pip-version-check', '--target', py / 'Lib' / 'site-packages', '--python-version', '3.14',
-         '--implementation', 'cp', '--abi', 'cp314', '--platform', 'win_amd64', '--only-binary', ':all:', 'numpy==2.5.4', 'lz4==4.4.5'])
+         '--implementation', 'cp', '--abi', 'cp314', '--platform', 'win_amd64', '--only-binary', ':all:', 'numpy==2.5.4', 'lz4==4.4.5', 'zstandard==0.25.0'])
     shutil.rmtree(py / 'Lib' / 'site-packages' / 'bin', ignore_errors=True)
     # numpy's tests and pip's compiled files are not used, and their long paths can break unpacking the ZIP in a long folder
     for d in list((py / 'Lib' / 'site-packages').rglob('tests')) + list((py / 'Lib' / 'site-packages').rglob('__pycache__')):
