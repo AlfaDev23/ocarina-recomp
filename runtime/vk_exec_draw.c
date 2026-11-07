@@ -1025,11 +1025,13 @@ static void c0_table(uint8_t *at, const p_bind_buf b[16]) {
 // 0x610, the base instance at 0x644. Other stages: zeros. Unbound slots read zero, since the replay keeps them zero.
 // Layout: nxnative dm/gfx/nvn/nvn_mtl.m (MIT).
 // LOCAL TEST (Ocarina): buffers a compute shader may reach through pointers stored in memory, which the translator cannot
-// see: it tests the addresses listed in c0 + 0x800, 16 bytes each (address, size). Collected per dispatch from the bound
+// see: it tests the addresses listed in c0 + 0x900, 16 bytes each (address, size). Collected per dispatch from the bound
 // uniform and storage buffers, following stored pointers two levels down. ponytail: only stored pointers near the start of
 // a buffer are followed and each binding stops at 32 MiB; a real fix would give shaders the guest address space.
-#define DYN_C0 0x800
+#define DYN_C0 0x900
 #define DYN_N 32
+_Static_assert(0x770 + 16 * 16 <= DYN_C0, "native mesh table overlaps candidates");
+_Static_assert(DYN_C0 + DYN_N * 16 <= VK_C0_BYTES, "candidate list exceeds bank");
 static struct { uint64_t addr, size; } dyn_lists[6][DYN_N];   // per NVN stage
 static int nvn_stage_of(int gfx_stage);
 
@@ -1156,7 +1158,7 @@ static void dyn_collect(VkExec *ex, const VkPipeInfo *info, int st) {
 void vk_c0_fill(uint8_t bank[VK_C0_BYTES], int stage, const p_bind_buf ssbo[16], const p_bind_buf ubo[16],
                 const uint32_t dispatch[3], uint32_t base_instance) {
     if (stage == NVN_STAGE_CS && c0_lay) {
-        if (!nvn2_c0_pack(bank, VK_C0_BYTES, c0_lay, c0_push, ssbo, ubo))
+        if (!nvn2_c0_pack(bank, DYN_C0, c0_lay, c0_push, ssbo, ubo))
             rt_fatal("vk: invalid NVN 2 compute parameter-block layout");
         memcpy(bank, dispatch, 12);   // LOCAL TEST (Ocarina): the first words of the bank are the dispatch size (the sky ambient divides by them)
         memcpy(bank + DYN_C0, dyn_lists[stage], sizeof dyn_lists[stage]);
@@ -1168,7 +1170,7 @@ void vk_c0_fill(uint8_t bank[VK_C0_BYTES], int stage, const p_bind_buf ssbo[16],
     if (base < 0) return;
     c0_table(bank + base, ssbo);
     if (stage == NVN_STAGE_VS || stage == 4) c0_table(bank + 0x770, ssbo);   // LOCAL TEST (Ocarina): the mesh stage's table (seedds/nxnative 5ae0d9aea)
-    // after the table: its slots 9+ lie on the list, and the guarded candidates there (translator patch 0025) must see the list. ponytail: a mesh shader using slot 9+ directly loses it
+    // The synthetic list follows every native table, including all 16 mesh storage slots.
     if (stage >= 0 && stage < 6 && dyn_lists[stage][0].addr) memcpy(bank + DYN_C0, dyn_lists[stage], sizeof dyn_lists[stage]);
     if (stage == 3) return;   // a task stage: its table is at c0+0x670; nothing else of this bank is used
     if (stage == NVN_STAGE_CS) {
@@ -1294,7 +1296,7 @@ static int ssbo_slot(const GfxShaderRes *r, int st, int *ubo) {
     // bindings; it does not synthesize that driver bank or establish the native NVN2 geometry ABI.
     int off = r->handle * 4, base = st == 3 ? 0x670 : st == NVN_STAGE_VS ? 0x110 : st == NVN_STAGE_FS ? 0x510 :
                                   st == NVN_STAGE_GS ? 0x410 : st == NVN_STAGE_CS || st == 4 ? 0x310 : -1;
-    if ((st == NVN_STAGE_VS || st == 4) && off >= 0x770 && off < DYN_C0 && (off - 0x770) % 16 == 0) return (off - 0x770) / 16;   // LOCAL TEST (Ocarina)
+    if ((st == NVN_STAGE_VS || st == 4) && off >= 0x770 && off < 0x870 && (off - 0x770) % 16 == 0) return (off - 0x770) / 16;   // LOCAL TEST (Ocarina)
     if (st == NVN_STAGE_CS && off >= 0x210 && off < 0x310 && (off - 0x210) % 16 == 0) {
         *ubo = 1;
         return (off - 0x210) / 16;
