@@ -15,6 +15,7 @@ Experimental. Só foi testado em **um PC** (Ryzen 9 9950X3D, RTX 5090), na regi�
 
 | O quê | Situação |
 |---|---|
+| Abertura e jogo novo, até a Árvore Deku | ✅ Funciona |
 | Vilarejo Kokiri: árvores, plantas, casas, luz | ✅ Funciona |
 | Som, controle, saves e vídeos | ✅ Funciona |
 | Desempenho na RTX 5090 | ✅ Cerca de 59 fps parado, 51 a 55 fps caminhando |
@@ -27,14 +28,18 @@ Experimental. Só foi testado em **um PC** (Ryzen 9 9950X3D, RTX 5090), na regi�
 
 O jogo não vem pronto: ele é compilado no seu PC, a partir da sua cópia. Escolha um destes três jeitos.
 
-**1. Com o instalador, o mais fácil:**
+**1. Com o instalador em ZIP, o mais fácil:** não instala nada no Windows e não pede administrador.
 
-1. Baixe o **[Instalar-Ocarina.exe](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest/download/Instalar-Ocarina.exe)** e dê dois cliques.
-2. O executável não tem assinatura digital, então o Windows pode avisar. Clique em **Mais informações** e depois em **Executar assim mesmo**.
-3. Na janela, escolha o `.nup` do seu jogo (ou uma pasta com `exefs` e `romfs`) e clique em **Instalar**.
-4. Se o Windows pedir permissão para instalar as ferramentas, clique em **Sim**.
+1. Baixe o **`Ocarina-Setup-...-windows.zip`** da [página de versões](https://github.com/sostenesfreitas/ocarina-recomp/releases/latest).
+2. **Extraia o ZIP inteiro** para uma pasta e abra o `Instalar-Ocarina.exe` que está dentro dela.
+3. O executável não tem assinatura digital, então o Windows pode avisar. Clique em **Mais informações** e depois em **Executar assim mesmo**.
+4. Na janela, escolha o `.nup` do seu jogo (ou uma pasta com `exefs` e `romfs`) e clique em **Instalar**.
+5. No fim, clique em **Jogar**, ou use o atalho **Ocarina Recomp** na Área de Trabalho.
 
-Prefere conferir antes? O executável só abre o [script do instalador](instalador/Instalar-Ocarina.ps1), e o [código dele](instalador/launcher.c) tem poucas linhas. A release traz o SHA-256 do arquivo. Antivírus às vezes reclamam de programas sem assinatura.
+Para desinstalar, apague a pasta de instalação. Prefere conferir antes? O executável só abre o [script do instalador](instalador/Instalar-Ocarina.ps1), e o [código dele](instalador/launcher.c) tem poucas linhas. A página de versões traz o SHA-256 do arquivo. Antivírus às vezes reclamam de programas sem assinatura.
+
+> [!WARNING]
+> **Evite minimizar a janela do instalador:** em alguns casos ela não volta. Se acontecer, feche pelo Gerenciador de Tarefas e abra o instalador de novo, que ele continua de onde parou. A etapa "Preparar os arquivos do jogo" é lenta, principalmente em HD: enquanto o relógio da janela andar, está funcionando.
 
 **2. Com os scripts, que você pode ler antes de rodar** (instale antes as ferramentas do passo 1 do [guia](docs/compilar-manual.md)):
 
@@ -56,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File .\compilar.ps1 -Jogo "C:\caminho\seu-jo
 
 ### O que isto faz no seu PC
 
-- Os scripts não pedem administrador. Instalar as ferramentas pode pedir: o instalador faz isso por você, e nos outros jeitos é você quem roda.
+- O instalador em ZIP e os scripts não pedem administrador. Só as ferramentas dos jeitos 2 e 3 podem pedir, e é você quem as instala.
 - Escreve só dentro da pasta do projeto, e nunca altera o seu arquivo do jogo.
 - Baixa os pacotes Python (`tools\requirements-build.txt`) e .NET do tradutor de shaders e, se o executável do jogo estiver comprimido, o [zbic](https://github.com/kinnay/zbic).
 - Para desinstalar, apague a pasta do projeto. As ferramentas do passo 1 saem pelo painel de aplicativos do Windows.
@@ -71,7 +76,7 @@ Leva de 30 minutos a 2 horas, e você pode usar o PC enquanto isso. Para atualiz
 - Windows 10 ou 11 de 64 bits, com processador compatível com AVX2.
 - Placa de vídeo com Vulkan 1.3 e mesh shaders, com o driver atualizado. Recomendamos NVIDIA.
 - Recomendamos 16 GB de RAM ou mais. Com menos, nunca testamos: a compilação ou o jogo podem falhar.
-- 60 GB livres, mais uns 15 GB no disco C: se as ferramentas ainda não estiverem instaladas.
+- 40 GB livres com o instalador em ZIP. Nos outros dois jeitos, 60 GB, mais uns 15 GB no disco C: para as ferramentas.
 - Internet durante a instalação.
 - **Sua cópia do jogo na versão 1.1.1.** Outras versões não funcionam.
 
